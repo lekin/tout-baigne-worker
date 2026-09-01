@@ -52,10 +52,14 @@
 ### Build & deploy workflow
 
 - CI: `.github/workflows/gpu-worker-build.yml` in `lekin/tout-baigne-worker`
-  - Builds `linux/amd64` natively on a GitHub-hosted runner
-  - Publishes to `ghcr.io/lekin/tout-baigne-worker`
-  - Tags: short git SHA, semver, `latest`
+  - Builds `linux/amd64` natively on a GitHub-hosted runner (no local M3/QEMU)
+  - Publishes to `ghcr.io/lekin/tout-baigne-worker` using `secrets.GITHUB_TOKEN`
+  - Tags: short git SHA (deploy source of truth), semver, `latest`
   - BuildKit `type=gha` cache for CUDA/PyTorch/Demucs/model layers
+  - Includes a step to set the GHCR package visibility to public after the first push
+- One-time setup: the workflow file is in the local tree at `.github/workflows/gpu-worker-build.yml` but cannot be pushed by the current PAT because it lacks the `workflow` scope. Either
+  (a) add `workflow` scope to the local PAT for one push, then revoke it, or
+  (b) create the file manually in the GitHub UI.
 - Deploy: `python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<tag>`
   - Requires `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`
   - Updates the endpoint template, cycles workers, polls `/ping`, and runs `scripts/smoke_test_worker.py`

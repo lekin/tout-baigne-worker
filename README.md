@@ -4,17 +4,21 @@ GPU worker images for karaoke sync QA on RunPod.
 
 ## Build
 
-Images are built natively on `linux/amd64` by GitHub Actions.
+Images are built natively on `linux/amd64` by GitHub Actions. The local Mac does **not** need `write:packages`.
 
 - `.github/workflows/gpu-worker-build.yml` builds and pushes to `ghcr.io/lekin/tout-baigne-worker`
-- Tags: short SHA, semver, `latest`
-- BuildKit layer caching is enabled (`type=gha`) so CUDA/PyTorch/Demucs/model layers reuse on rebuilds.
+- Uses `secrets.GITHUB_TOKEN` with `permissions: packages: write` for GHCR login and push
+- Tags: short git SHA (deploy source of truth), semver, `latest`
+- BuildKit layer caching is enabled (`type=gha`) so CUDA/PyTorch/Demucs/model layers reuse on rebuilds
+- After the first push, CI attempts to set the package visibility to public
 
-**Note:** `.github/workflows/gpu-worker-build.yml` is in the working tree but not yet in the remote repo because the local GitHub PAT does not have the `workflow` scope. Push it with a token that has `repo` + `workflow` + `write:packages`, or create it through the GitHub UI.
+**One-time setup:** the workflow file is in the local tree at `.github/workflows/gpu-worker-build.yml` but cannot be pushed by the current PAT because it lacks the `workflow` scope. Choose one:
+1. Temporarily add the `workflow` scope to your local PAT, run `git push`, then revoke the scope.
+2. Create `.github/workflows/gpu-worker-build.yml` in the GitHub UI using the file content from the working tree.
+
+After the workflow exists remotely, a qualifying push or `workflow_dispatch` triggers the build.
 
 Manual workflow dispatch is supported.
-
-For local pushes to GHCR, the token must have `read:packages` and `write:packages`.
 
 ### Local worker smoke test
 
