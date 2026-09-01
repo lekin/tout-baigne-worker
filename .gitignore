@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+.venv_*/
+venv/
+
+# Local environment
+.env
+.env.*
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Outputs / caches
+output/
+*.cache
+.pytest_cache/
+
+# Legacy / large / binary
+legacy/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.m4a
+*.aac
+*.mkv
+*.avi
+*.mov
+*.webm
+
+# Git itself
+.git/
+
+# Embedded apps
+backstage/
+
+# Temporary / media
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.aac
+*.m4a
+*.mkv
+*.avi
+*.mov
+*.webm
+
+# Large model files
+*.th
+*.pth
+*.pt
+*.onnx
