@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from check_runpod_worker import RunPodReadinessProbe, _api_key, _redact_url
+from check_runpod_worker import RunPodReadinessProbe, _api_key, _redact_query
 
 
 def _headers() -> Dict[str, str]:
@@ -51,16 +51,10 @@ def _get_endpoint(endpoint_id: str) -> Dict[str, Any]:
     return _get(f"/endpoints/{endpoint_id}")
 
 
-def _get_template(template_id: str) -> Dict[str, Any]:
-    return _get(f"/templates/{template_id}")
 
-
-def _update_template_image(template_id: str, image_name: str, docker_args: Optional[str] = None) -> None:
-    body: Dict[str, Any] = {"imageName": image_name}
-    if docker_args is not None:
-        body["dockerArgs"] = docker_args
-    data = _patch(f"/templates/{template_id}", body)
-    print(f"Updated template {data['id']} image to {_redact_url(data['imageName'])}")
+def _update_template_image(template_id: str, image_name: str) -> None:
+    data = _patch(f"/templates/{template_id}", {"imageName": image_name})
+    print(f"Updated template {data['id']} image to {_redact_query(data['imageName'])}")
 
 
 def _scale_workers(endpoint_id: str, workers_min: int, workers_max: int) -> None:
@@ -69,36 +63,19 @@ def _scale_workers(endpoint_id: str, workers_min: int, workers_max: int) -> None
 
 
 def _wait_for_no_workers(endpoint_id: str, timeout: int = 120) -> bool:
-    """Best-effort wait for the endpoint to have zero actual workers.
-
-    The v1 endpoint object does not include a live worker count, so we poll the
-    v1 workers endpoint. If it is unavailable, we fall back to a short sleep.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            r = requests.get(
-                f"https://rest.runpod.io/v2/endpoints/{endpoint_id}/workers",
-                headers=_headers(),
-                timeout=10,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                total = data.get("summary", {}).get("total", 0)
-                print(f"  live workers: {total}")
-                if total == 0:
-                    return True
-        except Exception as e:
-            print(f"  could not list workers: {e}")
-        time.sleep(5)
-    return False
+    """Best-effort wait for the endpoint to scale to zero workers."""
+    # The RunPod REST v1 endpoint object does not include a live worker count, and
+    # the v2 workers endpoint is not available. Wait a short fixed time so the
+    # platform has a chance to terminate the old worker before we scale back up.
+    print(f"  waiting {timeout}s for workers to terminate...")
+    time.sleep(timeout)
+    return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Deploy a worker image tag to RunPod")
     parser.add_argument("image_tag", help="Full image tag, e.g. ghcr.io/lekin/tout-baigne-worker:0.1.0")
     parser.add_argument("--endpoint-id", default=os.environ.get("RUNPOD_ENDPOINT_ID"))
-    parser.add_argument("--args", default="python3 -u /app/worker/handler.py")
     parser.add_argument("--no-smoke", action="store_true")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--expected-version", default=os.environ.get("RUNPOD_WORKER_EXPECTED_VERSION"))
@@ -108,20 +85,20 @@ def main() -> int:
         print("ERROR: --endpoint-id or RUNPOD_ENDPOINT_ID is required", file=sys.stderr)
         return 2
 
-    print(f"Deploying image {_redact_url(args.image_tag)} to endpoint {args.endpoint_id}")
+    if not args.expected_version and ":" in args.image_tag:
+        args.expected_version = args.image_tag.rsplit(":", 1)[1]
+
+    print(f"Deploying image {_redact_query(args.image_tag)} to endpoint {args.endpoint_id}")
 
     endpoint = _get_endpoint(args.endpoint_id)
     template_id = endpoint["templateId"]
     print(f"Template: {template_id}")
 
-    template = _get_template(template_id)
-    print(f"Current image: {_redact_url(template['imageName'])}")
-
-    _update_template_image(template_id, args.image_tag, args.args)
+    _update_template_image(template_id, args.image_tag)
 
     print("Scaling workers to 0...")
     _scale_workers(args.endpoint_id, 0, 0)
-    _wait_for_no_workers(args.endpoint_id)
+    _wait_for_no_workers(args.endpoint_id, timeout=30)
 
     print("Scaling workers to 1...")
     _scale_workers(args.endpoint_id, 0, 1)
