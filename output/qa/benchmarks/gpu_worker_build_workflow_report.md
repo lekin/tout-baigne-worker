@@ -151,6 +151,9 @@ Unit tests are in `scripts/tests/test_check_runpod_worker.py` and cover:
 - `worker/handler.py` starts locally on MPS and preloads `htdemucs`.
 - `GET /ping` returns `{"status":"ok","version":"test-sha"}` when `WORKER_VERSION=test-sha`.
 - `POST /run` with an invalid audio URL returns `success=false`, `error_type="input_error"`, matching the smoke-test contract.
+- `python scripts/smoke_test_worker.py` against `http://localhost:8000` passes:
+  - `/ping` status 200, version `local-test`
+  - `/run` status 200, `success=false`, `error_type="input_error"`
 - `python -m pytest src/qa/tests/test_qa.py`: 15 passed.
 - `.venv/bin/python scripts/tests/test_check_runpod_worker.py`: 10 passed.
 
