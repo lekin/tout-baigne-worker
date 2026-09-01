@@ -60,6 +60,7 @@ def _preload_models() -> None:
 async def lifespan(app: FastAPI):
     logger.info("Remote Audio QA worker starting")
     _preload_models()
+    logger.info("Remote Audio QA worker ready")
     yield
 
 
