@@ -42,36 +42,71 @@
 
 - Endpoint ID: `ylkhb72ej3hijz`
 - Name: `audio-qa-lb`
-- Type: `LOAD_BALANCER` (RunPod routes HTTP directly to the worker, which is more reliable than the managed queue worker with this image)
+- Type: `LOAD_BALANCER` (RunPod routes HTTP directly to the worker)
 - URL: `https://ylkhb72ej3hijz.api.runpod.ai`
-- Image: `mimbos/demucs-gpu:latest` (CUDA 12.1, public Docker Hub image, no custom `ENTRYPOINT`, so `args` can be a `bash -c "..."` command)
+- Image: `ghcr.io/lekin/tout-baigne-worker:<tag>` (custom CUDA/PyTorch/Demucs image built in CI) for the new workflow
 - GPU pool: `ADA_24` (NVIDIA GeForce RTX 4090)
 - Port: `8000/http` with `PORT=8000`, `PORT_HEALTH=8000`, `HEALTH_CHECK_PATH=/ping`
+- Startup args: `python3 -u /app/worker/handler.py`
+
+### Build & deploy workflow
+
+- CI: `.github/workflows/gpu-worker-build.yml` in `lekin/tout-baigne-worker`
+  - Builds `linux/amd64` natively on a GitHub-hosted runner
+  - Publishes to `ghcr.io/lekin/tout-baigne-worker`
+  - Tags: short git SHA, semver, `latest`
+  - BuildKit `type=gha` cache for CUDA/PyTorch/Demucs/model layers
+- Deploy: `python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<tag>`
+  - Requires `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`
+  - Updates the endpoint template, cycles workers, polls `/ping`, and runs `scripts/smoke_test_worker.py`
+- Smoke test: `python scripts/smoke_test_worker.py` (needs `RUNPOD_ENDPOINT_BASE_URL`)
 
 ### Important deployment notes
 
-- RunPod v2 with `ENTRYPOINT ["/bin/bash", "--login", "-c"]` (e.g. `maxhollmann/demucs`) splits the `args` string on spaces and uses the first token as the `-c` command. To run a multi-word shell command, use an image with no `ENTRYPOINT` and wrap the whole command in `bash -c "..."`.
-- The worker runs a one-shot install at first boot (git clone, pip install) because the container disk is not persisted across workers. For faster cold starts, use a network volume to cache `/workspace/tout-baigne` and `~/.cache/pip`.
-- The worker's `/run` endpoint receives a JSON body `{"input": <AudioQARequest>}`. It returns the `AudioQAResult` as a flat dict (not nested under `output`).
+- The worker image is fully baked: no `apt install`, `pip install`, or model download at boot.
+- The Demucs `htdemucs` model is preloaded inside the image at `/app/.torch_home` (`TORCH_HOME`).
+- The handler is a FastAPI app (`worker/handler.py`) with `/ping` and `/run`.
+- The `/run` endpoint receives `{"input": <AudioQARequest>}` and returns an `AudioQAResult` flat dict.
+- GHCR packages are public by default for public repos, but verify package visibility in GitHub settings.
 
-### curl example
+### Load Balancer requests require Bearer auth
+
+All Load Balancer requests (`/ping` and `/run`) must include:
+
+```http
+Authorization: Bearer <RUNPOD_API_KEY>
+```
+
+The key is not passed in query strings or logged.
+
+### Readiness probe
 
 ```bash
 export RUNPOD_API_KEY=...
-curl -X POST \
-  -H "Authorization: Bearer $RUNPOD_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d @/tmp/qa_request_wrapped.json \
-  --max-time 300 \
-  https://ylkhb72ej3hijz.api.runpod.ai/run
+export RUNPOD_ENDPOINT_ID=ylkhb72ej3hijz
+
+python scripts/check_runpod_worker.py --endpoint $RUNPOD_ENDPOINT_ID --timeout 120
+```
+
+The probe:
+- sends `Authorization: Bearer ...` on every request
+- logs every attempt, status, and response-body prefix
+- fails fast on `401`/`403`
+- uses a real overall deadline with `time.monotonic()`
+- optionally checks `/ping` `version` against an expected git SHA
+
+### Deploy
+
+```bash
+export RUNPOD_API_KEY=...
+export RUNPOD_ENDPOINT_ID=ylkhb72ej3hijz
+
+python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<tag>
 ```
 
 ### Client usage
 
 ```bash
-# Queue endpoint (legacy)
-python scripts/runpod_remote_qa_client.py --record-id <id> --endpoint-id <queue-id>
-
 # Load Balancer endpoint
 python scripts/runpod_remote_qa_client.py --record-id <id> --endpoint-id ylkhb72ej3hijz --lb --audio-url <public-mp3-url>
 ```
@@ -81,3 +116,4 @@ For records without a direct `Source Audio URL`, use `--audio-url` to pass a pub
 ### Status
 
 - 2026-09-01: E2E succeeded on `Khaled - Aïcha` and `Willy Denzey - Le mur du son` using Load Balancer endpoint `ylkhb72ej3hijz` (RTX 4090, Demucs 4.0.1, ~20–30 s wall time).
+- 2026-09-01: `worker/handler.py` now returns `{"status":"ok","version":...}` on `/ping`; `scripts/check_runpod_worker.py` performs authenticated, bounded readiness probes.

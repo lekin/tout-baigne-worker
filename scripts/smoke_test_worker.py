@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Lightweight smoke test for a deployed RunPod Audio QA worker.
+"""Lightweight authenticated smoke test for a deployed RunPod Audio QA worker.
 
 Usage:
+    export RUNPOD_API_KEY=...
     export RUNPOD_ENDPOINT_BASE_URL=https://<id>.api.runpod.ai
     python scripts/smoke_test_worker.py
 
 Performs:
-  1. GET /ping
-  2. POST /run with a minimal request containing an empty lyric list
+  1. GET /ping with Bearer auth
+  2. POST /run with a minimal request and Bearer auth
   3. Verifies the response can be deserialized and contains the expected fields.
 """
 import json
@@ -16,6 +17,13 @@ import sys
 from typing import Any, Dict
 
 import requests
+
+
+def _api_key() -> str:
+    key = os.environ.get("RUNPOD_API_KEY")
+    if not key:
+        raise RuntimeError("RUNPOD_API_KEY is not set")
+    return key
 
 
 def _base_url() -> str:
@@ -27,16 +35,17 @@ def _base_url() -> str:
 
 def main() -> int:
     base_url = _base_url()
+    headers = {"Authorization": f"Bearer {_api_key()}"}
     print(f"Smoke testing endpoint: {base_url}")
 
     # 1. Health check
     ping_url = f"{base_url}/ping"
-    r = requests.get(ping_url, timeout=10)
+    r = requests.get(ping_url, headers=headers, timeout=10)
     print(f"  /ping status: {r.status_code}")
     r.raise_for_status()
     print(f"  /ping body: {r.text}")
 
-    # 2. Send a trivial, intentionally failing-in-Demucs request to confirm pipeline
+    # 2. Send a trivial request to confirm the /run pipeline is reachable
     run_url = f"{base_url}/run"
     payload: Dict[str, Any] = {
         "input": {
@@ -45,7 +54,7 @@ def main() -> int:
             "lyrics": [],
         }
     }
-    r = requests.post(run_url, json=payload, timeout=30)
+    r = requests.post(run_url, headers=headers, json=payload, timeout=30)
     print(f"  /run status: {r.status_code}")
     r.raise_for_status()
     result = r.json()

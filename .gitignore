@@ -25,8 +25,12 @@ output/
 *.cache
 .pytest_cache/
 
-# Legacy / large / binary
+# Large media / local data
 legacy/
+input/
+overlays/
+examples/
+tools/
 *.png
 *.jpg
 *.jpeg
@@ -47,26 +51,24 @@ legacy/
 *.mov
 *.webm
 
+# Large model files
+*.th
+*.pth
+*.pt
+*.onnx
+
 # Git itself
 .git/
 
 # Embedded apps
 backstage/
 
-# Temporary / media
-*.mp3
-*.mp4
-*.wav
-*.flac
-*.aac
-*.m4a
-*.mkv
-*.avi
-*.mov
-*.webm
+# Project docs (too many in root; keep only README and AGENTS)
+*.md
+!README.md
+!AGENTS.md
+!worker/README.md
 
-# Large model files
-*.th
-*.pth
-*.pt
-*.onnx
+# Root test scratch files
+test_*.py
+!scripts/tests/test_check_runpod_worker.py

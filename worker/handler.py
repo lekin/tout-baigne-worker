@@ -71,7 +71,10 @@ class QAInput(BaseModel):
 
 @app.get("/ping")
 def ping() -> Dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": os.environ.get("WORKER_VERSION", "unknown"),
+    }
 
 
 def _safe_record_id(payload: Dict[str, Any]) -> str:
