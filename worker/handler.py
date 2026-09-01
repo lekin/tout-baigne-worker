@@ -58,6 +58,7 @@ def _preload_models() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Remote Audio QA worker starting")
     _preload_models()
     yield
 
