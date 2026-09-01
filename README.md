@@ -16,6 +16,19 @@ Manual workflow dispatch is supported.
 
 For local pushes to GHCR, the token must have `read:packages` and `write:packages`.
 
+### Local worker smoke test
+
+```bash
+# Starts worker/handler.py on port 8000 and runs scripts/smoke_test_worker.py
+scripts/test_worker_local.sh
+
+# Or manually:
+scripts/run_worker_local.sh
+# in another shell:
+RUNPOD_API_KEY=dummy RUNPOD_ENDPOINT_BASE_URL=http://localhost:8000 \
+  python scripts/smoke_test_worker.py
+```
+
 ## Deploy
 
 ```bash

@@ -88,6 +88,17 @@ export RUNPOD_ENDPOINT_ID=ylkhb72ej3hijz
 python scripts/check_runpod_worker.py --endpoint $RUNPOD_ENDPOINT_ID --timeout 120
 ```
 
+Local test against `http://localhost:8000`:
+
+```bash
+RUNPOD_API_KEY=dummy \
+  python scripts/check_runpod_worker.py \
+  --endpoint local \
+  --base-url http://localhost:8000 \
+  --expected-version local-test \
+  --no-smoke
+```
+
 The probe:
 - sends `Authorization: Bearer ...` on every request
 - logs every attempt, status, and response-body prefix
