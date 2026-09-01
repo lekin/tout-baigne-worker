@@ -16,8 +16,6 @@
 
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
-ARG WORKER_VERSION=unknown
-ENV WORKER_VERSION=${WORKER_VERSION}
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV TORCH_HOME=/app/.torch_home
@@ -75,5 +73,8 @@ PY
 # Keep root to match existing RunPod worker expectations.
 
 EXPOSE 8000
+
+ARG WORKER_VERSION=unknown
+ENV WORKER_VERSION=${WORKER_VERSION}
 
 CMD ["python3", "/app/worker/handler.py"]
