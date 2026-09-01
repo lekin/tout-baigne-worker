@@ -1,0 +1,57 @@
+{
+  "status_counts": {
+    "SYNC_VERIFIED": 78,
+    "SYNC_NEEDS_REVIEW": 11,
+    "SYNC_FAILED": 11
+  },
+  "diagnosis_counts": {
+    "good": 84,
+    "local_mismatch": 11,
+    "suspected_wrong_version": 5
+  },
+  "gate_failure_counts": {
+    "line_start_p90": 1,
+    "line_coverage": 2,
+    "unresolved_lyric_region": 10,
+    "line_start_max": 6
+  },
+  "total_source_audio_s": 24197.76,
+  "total_source_audio_min": 403.3,
+  "total_worker_runtime_s": 1010.54,
+  "batch_wall_time_s": 689.594,
+  "tracks_per_minute": 8.7,
+  "realtime_factor": 35.09,
+  "client_wall_time_s": {
+    "median": 7.58,
+    "p90": 27.24,
+    "max": 30.16
+  },
+  "worker_runtime_s": {
+    "median": 7.06,
+    "p90": 25.48,
+    "max": 28.81
+  },
+  "component_times_s": {
+    "download_median_p90_max": [
+      1.82,
+      5.79,
+      7.0
+    ],
+    "separation_median_p90_max": [
+      2.92,
+      12.85,
+      14.73
+    ],
+    "alignment_median_p90_max": [
+      1.03,
+      6.89,
+      7.92
+    ]
+  },
+  "cost_usd": {
+    "per_100_active_runtime": 0.3088,
+    "per_100_warm_worker_uptime": 0.2107,
+    "per_track_active_runtime": 0.0031,
+    "projected_1000_active_runtime": 3.0878
+  }
+}
