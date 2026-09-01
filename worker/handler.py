@@ -74,6 +74,7 @@ def ping() -> Dict[str, str]:
     return {
         "status": "ok",
         "version": os.environ.get("WORKER_VERSION", "unknown"),
+        "gpu": _gpu_name(),
     }
 
 
