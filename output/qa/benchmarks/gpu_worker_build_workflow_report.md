@@ -146,7 +146,15 @@ Unit tests are in `scripts/tests/test_check_runpod_worker.py` and cover:
 - version mismatch
 - version match
 
-## 13. Measured RunPod cold/warm behavior
+## 13. Local verification
+
+- `worker/handler.py` starts locally on MPS and preloads `htdemucs`.
+- `GET /ping` returns `{"status":"ok","version":"test-sha"}` when `WORKER_VERSION=test-sha`.
+- `POST /run` with an invalid audio URL returns `success=false`, `error_type="input_error"`, matching the smoke-test contract.
+- `python -m pytest src/qa/tests/test_qa.py`: 15 passed.
+- `.venv/bin/python scripts/tests/test_check_runpod_worker.py`: 10 passed.
+
+## 14. Measured RunPod cold/warm behavior
 
 No worker is currently running because the container image cannot be pulled:
 
@@ -164,8 +172,6 @@ Cold/warm E2E timings will be measured once the image is available in GHCR via C
 4. **CI build timing**: needs to be measured on the first real CI run (cold cache vs. warm cache vs. code-only change).
 
 ## 15. Reusable pattern for future GPU workers
-
-## 14. Reusable pattern for future GPU workers
 
 - Keep a `worker/Dockerfile` per service with the same heavy-layers-first order.
 - Use `docker/metadata-action` for immutable tags.
