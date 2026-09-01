@@ -50,31 +50,26 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
 COPY worker/requirements.txt /app/worker/requirements.txt
 RUN python3 -m pip install -r /app/worker/requirements.txt
 
+# Pre-download the default Demucs model so cold starts avoid network latency.
+# Keep this layer BEFORE copying src/worker so code-only changes do not
+# invalidate the model cache and force a long re-download.
+RUN python3 - <<'PY'
+from demucs.pretrained import get_model
+model_name = __import__('os').environ.get("PRELOAD_DEMUCS_MODELS", "htdemucs").split(",")[0].strip()
+print(f"Preloading Demucs model: {model_name}")
+get_model(model_name)
+print("Preload complete")
+PY
+
 # Copy the runtime source code needed by the worker.
 COPY src /app/src
 COPY worker /app/worker
 
-# Pre-download the default Demucs model so cold starts avoid network latency.
-# The TORCH_HOME env var above makes the cache live in the image.
-RUN python3 - <<'PY'
-import os
-import torch
-from demucs.pretrained import get_model
-from src.qa.separator import PyTorchDemucsSeparator
-
-model_name = os.environ.get("PRELOAD_DEMUCS_MODELS", "htdemucs").split(",")[0].strip()
-print(f"Preloading Demucs model: {model_name}")
-get_model(model_name)
-PyTorchDemucsSeparator.preload_model(model_name)
-print("Preload complete")
-PY
-
-# Non-root user is unnecessary for RunPod but harmless.
-# Keep root to match existing RunPod worker expectations.
-
-EXPOSE 8000
-
+# Inject the build-time git SHA as late as possible so only this tiny layer
+# changes between code-only commits.
 ARG WORKER_VERSION=unknown
 ENV WORKER_VERSION=${WORKER_VERSION}
+
+EXPOSE 8000
 
 CMD ["python3", "/app/worker/handler.py"]
