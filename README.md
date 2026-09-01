@@ -10,7 +10,11 @@ Images are built natively on `linux/amd64` by GitHub Actions.
 - Tags: short SHA, semver, `latest`
 - BuildKit layer caching is enabled (`type=gha`) so CUDA/PyTorch/Demucs/model layers reuse on rebuilds.
 
+**Note:** `.github/workflows/gpu-worker-build.yml` is in the working tree but not yet in the remote repo because the local GitHub PAT does not have the `workflow` scope. Push it with a token that has `repo` + `workflow` + `write:packages`, or create it through the GitHub UI.
+
 Manual workflow dispatch is supported.
+
+For local pushes to GHCR, the token must have `read:packages` and `write:packages`.
 
 ## Deploy
 
