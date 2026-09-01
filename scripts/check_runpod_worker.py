@@ -89,9 +89,9 @@ class RunPodReadinessProbe:
         self,
         endpoint_id: str,
         expected_version: Optional[str] = None,
-        overall_timeout: int = 120,
+        overall_timeout: int = 300,
         poll_interval: float = 2.5,
-        request_timeout: tuple = (15.0, 60.0),
+        request_timeout: tuple = (30.0, 180.0),
         base_url: Optional[str] = None,
     ):
         self.endpoint_id = endpoint_id
@@ -279,9 +279,9 @@ def main() -> int:
     parser.add_argument("--endpoint", default=os.environ.get("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--base-url", default=os.environ.get("RUNPOD_ENDPOINT_BASE_URL"))
     parser.add_argument("--expected-version", default=os.environ.get("RUNPOD_WORKER_EXPECTED_VERSION"))
-    parser.add_argument("--timeout", type=int, default=int(os.environ.get("RUNPOD_READINESS_TIMEOUT", "180")))
+    parser.add_argument("--timeout", type=int, default=int(os.environ.get("RUNPOD_READINESS_TIMEOUT", "300")))
     parser.add_argument("--poll-interval", type=float, default=float(os.environ.get("RUNPOD_POLL_INTERVAL", "2.5")))
-    parser.add_argument("--request-timeout", type=float, default=float(os.environ.get("RUNPOD_REQUEST_TIMEOUT", "60")), help="Per-request timeout in seconds")
+    parser.add_argument("--request-timeout", type=float, default=float(os.environ.get("RUNPOD_REQUEST_TIMEOUT", "180")), help="Per-request timeout in seconds")
     parser.add_argument("--no-smoke", action="store_true")
     args = parser.parse_args()
 

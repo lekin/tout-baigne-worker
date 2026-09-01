@@ -77,7 +77,8 @@ def main() -> int:
     parser.add_argument("image_tag", help="Full image tag, e.g. ghcr.io/lekin/tout-baigne-worker:0.1.0")
     parser.add_argument("--endpoint-id", default=os.environ.get("RUNPOD_ENDPOINT_ID"))
     parser.add_argument("--no-smoke", action="store_true")
-    parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--request-timeout", type=float, default=float(os.environ.get("RUNPOD_REQUEST_TIMEOUT", "180")), help="Per-request timeout in seconds")
     parser.add_argument("--expected-version", default=os.environ.get("RUNPOD_WORKER_EXPECTED_VERSION"))
     args = parser.parse_args()
 
@@ -108,6 +109,7 @@ def main() -> int:
         endpoint_id=args.endpoint_id,
         expected_version=args.expected_version,
         overall_timeout=args.timeout,
+        request_timeout=(max(1.0, args.request_timeout / 4), args.request_timeout),
     )
     result = probe.probe()
 
