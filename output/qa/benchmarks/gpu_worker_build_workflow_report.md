@@ -167,12 +167,30 @@ No worker is currently running because the container image cannot be pulled:
 
 Cold/warm E2E timings will be measured once the image is available in GHCR via CI.
 
-## 14. Remaining blockers / next steps
+## 15. Workflow validation
 
-1. **GitHub PAT scopes**: the local PAT lacks the `workflow` scope, so `.github/workflows/gpu-worker-build.yml` was not pushed to the repo. It is in the local working tree and must be committed with a token that has `workflow` scope, or added through the GitHub UI.
-2. **GHCR push scope**: the local PAT lacks `write:packages`, so the built image could not be pushed to `ghcr.io/lekin/tout-baigne-worker`. CI will use `secrets.GITHUB_TOKEN` with `packages: write` and is the correct path.
+The workflow at `.github/workflows/gpu-worker-build.yml` has been validated:
+
+- YAML syntax: OK (checked with `python -m yaml.safe_load`).
+- Runner: `ubuntu-latest` building `linux/amd64` natively.
+- GHCR login: uses `docker/login-action` with `username: ${{ github.actor }}` and `password: ${{ secrets.GITHUB_TOKEN }}`.
+- Permissions: `contents: read` and `packages: write`.
+- Tags: `type=sha,format=short`, `type=semver,pattern={{version}}`, `latest` on default branch.
+- Build args: `WORKER_VERSION=${{ github.sha }}`.
+- BuildKit cache: `cache-from: type=gha` / `cache-to: type=gha,mode=max`.
+- Post-push step: attempts to set the GHCR package visibility to public.
+- Path filters include `worker/**`, `src/qa/**`, `.github/workflows/gpu-worker-build.yml`, `worker/Dockerfile`, `worker/requirements.txt`.
+
+## 16. Remaining blockers / next steps
+
+1. **GitHub PAT scope for workflow push**: the local PAT has `repo` but not `workflow`, so it cannot create or push `.github/workflows/gpu-worker-build.yml`. The minimal one-time fix is either:
+   - temporarily add the `workflow` scope to the local PAT, `git push`, then revoke it, or
+   - create the file manually in the GitHub UI.
+   No `write:packages` is required on the local Mac.
+2. **GHCR package visibility**: the first CI run will create the package. The workflow includes a step to set it public; if that fails, set it manually in **Package settings → Change visibility**.
 3. **Image pull time**: once the image is in GHCR, pulling the ~5.55 GB image to RunPod will likely be the dominant cold-start cost.
 4. **CI build timing**: needs to be measured on the first real CI run (cold cache vs. warm cache vs. code-only change).
+5. **Deployment and smoke test**: after CI publishes the SHA image, run `scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<sha>` and verify `/ping.version == <sha>`.
 
 ## 15. Reusable pattern for future GPU workers
 
