@@ -70,5 +70,9 @@ backstage/
 !worker/README.md
 
 # Root test scratch files
-test_*.py
+/test_*.py
+
+# Keep selected test modules
+!src/qa/tests/__init__.py
+!src/qa/tests/test_qa.py
 !scripts/tests/test_check_runpod_worker.py

@@ -92,9 +92,10 @@ class RunPodReadinessProbe:
         overall_timeout: int = 120,
         poll_interval: float = 2.5,
         request_timeout: tuple = (3.0, 8.0),
+        base_url: Optional[str] = None,
     ):
         self.endpoint_id = endpoint_id
-        self.base_url = f"https://{endpoint_id}.api.runpod.ai"
+        self.base_url = base_url or f"https://{endpoint_id}.api.runpod.ai"
         self.ping_url = f"{self.base_url}/ping"
         self.expected_version = expected_version
         self.overall_timeout = overall_timeout
@@ -276,11 +277,11 @@ def run_smoke(endpoint_id: str, request_timeout: tuple = (3.0, 30.0)) -> float:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check RunPod Load Balancer worker readiness")
     parser.add_argument("--endpoint", default=os.environ.get("RUNPOD_ENDPOINT_ID"))
+    parser.add_argument("--base-url", default=os.environ.get("RUNPOD_ENDPOINT_BASE_URL"))
     parser.add_argument("--expected-version", default=os.environ.get("RUNPOD_WORKER_EXPECTED_VERSION"))
     parser.add_argument("--timeout", type=int, default=int(os.environ.get("RUNPOD_READINESS_TIMEOUT", "120")))
     parser.add_argument("--poll-interval", type=float, default=float(os.environ.get("RUNPOD_POLL_INTERVAL", "2.5")))
     parser.add_argument("--no-smoke", action="store_true")
-    parser.add_argument("--base-url")
     args = parser.parse_args()
 
     if not args.endpoint:
@@ -290,6 +291,7 @@ def main() -> int:
     try:
         probe = RunPodReadinessProbe(
             endpoint_id=args.endpoint,
+            base_url=args.base_url,
             expected_version=args.expected_version,
             overall_timeout=args.timeout,
             poll_interval=args.poll_interval,
