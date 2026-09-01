@@ -35,6 +35,31 @@ __pycache__
 .env
 .env.*
 
+# Local media / caches / input data (can be very large)
+input
+input/
+overlays
+overlays/
+*.mov
+*.mp4
+*.avi
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ttf
+*.otf
+*.woff
+*.woff2
+
 # Example / docs (not needed by worker)
 examples
 docs
