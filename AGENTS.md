@@ -57,12 +57,12 @@
   - Tags: short git SHA (deploy source of truth), semver, `latest`
   - BuildKit `type=gha` cache for CUDA/PyTorch/Demucs/model layers
   - Includes a step to set the GHCR package visibility to public after the first push
-- One-time setup: the workflow file is in the local tree at `.github/workflows/gpu-worker-build.yml` but cannot be pushed by the current PAT because it lacks the `workflow` scope. Either
-  (a) add `workflow` scope to the local PAT for one push, then revoke it, or
-  (b) create the file manually in the GitHub UI.
+- One-time `workflow`-scope push is already done; the workflow now lives in the remote repo. The local PAT does **not** need `write:packages`.
 - Deploy: `python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<tag>`
   - Requires `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`
-  - Updates the endpoint template, cycles workers, polls `/ping`, and runs `scripts/smoke_test_worker.py`
+  - Updates the endpoint template, cycles workers, polls `/ping`, verifies `version == <sha>`, and runs `scripts/smoke_test_worker.py`
+  - Defaults to 300s overall timeout and 180s per request to tolerate image-pull cold starts
+- Rollback: `python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<previous-sha>` (no rebuild)
 - Smoke test: `python scripts/smoke_test_worker.py` (needs `RUNPOD_ENDPOINT_BASE_URL`)
 
 ### Important deployment notes
@@ -131,4 +131,6 @@ For records without a direct `Source Audio URL`, use `--audio-url` to pass a pub
 ### Status
 
 - 2026-09-01: E2E succeeded on `Khaled - Aïcha` and `Willy Denzey - Le mur du son` using Load Balancer endpoint `ylkhb72ej3hijz` (RTX 4090, Demucs 4.0.1, ~20–30 s wall time).
-- 2026-09-01: `worker/handler.py` now returns `{"status":"ok","version":...}` on `/ping`; `scripts/check_runpod_worker.py` performs authenticated, bounded readiness probes.
+- 2026-09-01: `worker/handler.py` now returns `{"status":"ok","version":..., "gpu": ...}` on `/ping`; `scripts/check_runpod_worker.py` performs authenticated, bounded readiness probes.
+- 2026-09-01: CI/GitHub-Actions/RunPod loop complete: workflow pushed, multiple native `linux/amd64` builds published to GHCR, deployed, version-verified, smoke QA passed, rollback verified, scale-to-zero confirmed.
+- 2026-09-01: Dockerfile cache fixed — `ARG WORKER_VERSION` moved to final layer and Demucs model preload moved before `COPY src/worker`, giving sub-3-minute code-only CI builds.

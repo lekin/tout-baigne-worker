@@ -12,11 +12,9 @@ Images are built natively on `linux/amd64` by GitHub Actions. The local Mac does
 - BuildKit layer caching is enabled (`type=gha`) so CUDA/PyTorch/Demucs/model layers reuse on rebuilds
 - After the first push, CI attempts to set the package visibility to public
 
-**One-time setup:** the workflow file is in the local tree at `.github/workflows/gpu-worker-build.yml` but cannot be pushed by the current PAT because it lacks the `workflow` scope. Choose one:
-1. Temporarily add the `workflow` scope to your local PAT, run `git push`, then revoke the scope.
-2. Create `.github/workflows/gpu-worker-build.yml` in the GitHub UI using the file content from the working tree.
+The workflow file is already pushed to the remote repository. Future changes to `worker/**`, `src/qa/**`, `worker/Dockerfile`, `worker/requirements.txt`, or `.github/workflows/gpu-worker-build.yml` will trigger a build automatically. You can also trigger a manual build with `workflow_dispatch`.
 
-After the workflow exists remotely, a qualifying push or `workflow_dispatch` triggers the build.
+The local PAT does **not** need `write:packages`; GHCR push uses the repository `GITHUB_TOKEN`.
 
 Manual workflow dispatch is supported.
 
@@ -44,8 +42,16 @@ python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<sha-or-
 The script:
 1. Updates the endpoint template to the requested image tag.
 2. Scales workers to 0 and then back to 1 for a clean cold start.
-3. Polls `/ping` until healthy.
+3. Polls `/ping` until healthy and verifies the `/ping.version` field matches the git SHA.
 4. Runs a smoke test.
+
+Rollback is just re-running the deploy with a previous SHA:
+
+```bash
+python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<previous-sha>
+```
+
+No rebuild is required.
 
 ## Local debugging (not the normal production path)
 

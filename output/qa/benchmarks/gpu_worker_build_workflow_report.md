@@ -53,99 +53,104 @@ The local Mac no longer builds or pushes production CUDA images.
 - Build arg: `WORKER_VERSION=${{ github.sha }}`.
 - Post-push step attempts to set the GHCR package visibility to public.
 
-## 5. First CI build (cold cache)
+## 5. Dockerfile layering (final)
 
-- Workflow run: `33554006202`
-- Head SHA: `554871c38fbea1e7fe85c8139c5d576d4c99fd5f`
-- Started: `2026-09-01T20:13:04Z`
-- Completed: `2026-09-01T20:25:33Z`
-- Total workflow duration: **749 s (12 m 29 s)**
-- `Build and push image`: **718 s (11 m 58 s)**
-- Platform: `linux/amd64`
-- No QEMU.
-- Cache: cold.
+`worker/Dockerfile` now keeps heavy layers stable and only changes the final metadata layer per commit:
 
-## 6. Second CI build (partial cache, Dockerfile ARG placement issue)
+1. `FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`
+2. `ENV` for `PYTHONUNBUFFERED`, `PIP_NO_CACHE_DIR`, `TORCH_HOME`, `QA_CACHE_DIR`, `QA_WORK_DIR`, `PRELOAD_DEMUCS_MODELS`
+3. `RUN apt-get install python3.10 ffmpeg libsndfile1 ...`
+4. `RUN update-alternatives` for python
+5. `WORKDIR /app`
+6. `RUN pip install PyTorch+cu121 torchaudio+cu121`
+7. `COPY worker/requirements.txt` + `RUN pip install -r ...` (Demucs + scientific Python)
+8. `RUN python3 - <<'PY'` — **pre-download Demucs `htdemucs` model**
+9. `COPY src /app/src`
+10. `COPY worker /app/worker`
+11. `ARG WORKER_VERSION` / `ENV WORKER_VERSION` — **injected at the very end**
+12. `EXPOSE 8000` / `CMD`
 
-- Workflow run: `33559411643`
-- Head SHA: `0e52d49febadc4416a89e2739c78d165b52ce57f`
-- Started: `2026-09-01T21:08:44Z`
-- Completed: `2026-09-01T21:16:22Z`
-- Total workflow duration: **458 s (7 m 38 s)**
-- `Build and push image`: **443 s (7 m 23 s)**
-- Image: `ghcr.io/lekin/tout-baigne-worker:0e52d49`
-- Cache behavior: The `worker/Dockerfile` originally declared `ARG WORKER_VERSION` at the very top, so the SHA build arg invalidated every layer (apt, PyTorch, pip, model preload). The build still reused the `type=gha` pip wheel cache, but the image layers were rebuilt, and RunPod had to re-pull a 2.887 GB layer. Lesson: move build args that change every commit as close to the final layer as possible.
+Lessons learned and applied:
 
-## 7. Dockerfile fix
+- `ARG WORKER_VERSION` at the top invalidated every subsequent layer on every commit → moved to the final step.
+- The model preload ran *after* `COPY src /app/src` and `COPY worker /app/worker`, so every code change forced a ~10-minute model re-download → preloaded *before* copying application code.
+- The preload no longer imports `src.qa.separator`; it only calls `demucs.pretrained.get_model`, keeping the model layer fully stable.
 
-`ARG WORKER_VERSION` and `ENV WORKER_VERSION` were moved to just before `CMD`. Heavy layers (CUDA, apt, PyTorch, pip, Demucs model preload) are now fully stable and do not rebuild on every commit.
+## 6. CI build timing summary
 
-## 8. GHCR image publication
+| Run | Head SHA | Build & push | Workflow total | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `554871c` | 11 m 58 s | 12 m 29 s | Cold cache, no prior `type=gha` build. |
+| 2 | `0e52d49` | 7 m 23 s | 7 m 38 s | Partial cache; `ARG WORKER_VERSION` still at top, heavy layers rebuilt. |
+| 3 | `2fb3d75` | 8 m 40 s | 9 m 3 s | First Dockerfile arg move, but cache chain changed, heavy layers rebuilt. |
+| 4 | `0d65533` | 11 m 8 s | 11 m 48 s | Model still re-downloaded because preload ran after `COPY`. |
+| 5 | `4615377` | 4 m 24 s | 4 m 52 s | Model preload moved before `COPY`; heavy layers cache hit, only final `ENV` rebuilt. |
+| 6 | `dfc4d29` | 2 m 54 s | 3 m 47 s | True code-only build; apt/PyTorch/pip/model layers fully CACHED; only `COPY src`, `COPY worker`, and `ENV WORKER_VERSION` changed. |
+
+## 7. GHCR image publication
 
 - Package: `ghcr.io/lekin/tout-baigne-worker`
-- Tags observed: `554871c`, `0e52d49`, `latest`
-- Manifest digest (0e52d49 list): `sha256:3e750a36fd02aa459acb88559de53a5fea866cef51f10c844846e30cdf905872`
-- Compressed size: **~5.25 GB**
-- Architecture: `amd64`
-- Visibility: public (verified by anonymous `docker pull` after `docker logout ghcr.io`)
+- Tags observed: `554871c`, `0e52d49`, `2fb3d75`, `4615377`, `0d65533`, `dfc4d29`, `latest`
+- Current `latest` manifest list digest: `sha256:15b9828def369aabdcdd4b0190e00f41f501bce11bb6cbbc794e741dfa1090d1`
+- Architecture: `linux/amd64`
+- Compressed size: ~5.25 GB
+- Visibility: public (verified by anonymous `docker pull`)
 
-## 9. First deployment (`554871c`)
+## 8. RunPod deployment and timing summary
 
-- Command:
-  ```bash
-  python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:554871c
-  ```
-- Cold start: **55.85 s**
-- `/ping` version: `554871c38fbea1e7fe85c8139c5d576d4c99fd5f` (match)
-- Smoke: **0.66 s**, `error_type="input_error"` (expected)
+| Image | SHA prefix | Cold start | `/ping` version | Smoke | QA first | QA warm median |
+| --- | --- | --- | --- | --- | --- | --- |
+| `554871c` | `554871c...` | 55.85 s | match | 0.66 s | 3.10 s | 1.62 s |
+| `0e52d49` | `0e52d49...` | ~110 s | match | 0.76 s | — | — |
+| `2fb3d75` | `2fb3d75...` | 90.46 s (probe timed out on first try, 60s request too short) | match | 0.76 s | — | — |
+| `4615377` | `4615377...` | 123.47 s | match | 0.72 s | — | — |
+| `dfc4d29` | `dfc4d29...` | 135.09 s | match | 0.71 s | 3.21 s | 1.70 s |
+| rollback `554871c` | `554871c...` | 154.91 s | match | 0.80 s | — | — |
 
-Endpoint configuration preserved:
+Cold start includes RunPod pulling the ~5.25 GB image. The `type=gha` cache in CI is now healthy, but each new image still needs to be pulled to RunPod unless the host already has the same layer stack. This is a RunPod image-cache concern, not a CI build concern.
+
+Endpoint preserved across all deploys:
 
 - GPU: NVIDIA GeForce RTX 4090 (`ADA_24`)
 - Workers: min `0`, max `1`, idle timeout `300` s
 - Ports: `80/http`, `8000/http`
 - Env: `PORT=8000`, `PORT_HEALTH=8000`, `HEALTH_CHECK_PATH=/ping`
+- Startup args: `python3 -u /app/worker/handler.py`
 
-## 10. Warm behavior (`554871c`)
+## 9. Smoke and real QA
 
-| Metric | Value |
-| --- | --- |
-| Warm `/ping` | 0.41 s |
-| Smoke `/run` (3) | 0.73, 0.55, 0.56 s; **median 0.56 s** |
-| First real QA `/run` (27 s sample) | **3.10 s** |
-| Warm QA `/run` (3) | 1.55, 1.65, 1.62 s; **median 1.62 s** |
+- Smoke: `POST /run` with empty lyrics returns `success=false`, `error_type="input_error"`, `error="missing lyrics"`. This is the expected contract smoke and runs in ~0.7 s.
+- Real QA: used a public 27 s MP3 (`https://files.edge.network/misc/mp3/file_example_MP3_700KB.mp3`) and one-line dummy lyrics. The worker returned `SYNC_FAILED` with a high-confidence `global_offset` diagnosis, confirming the full `audio download → Demucs → structural QA → scoring` path.
 
-## 11. Second deployment (`0e52d49`)
-
-- Cold start: **~110 s** (image had to re-pull the PyTorch/Demucs layer because the `ARG` was at the top of the Dockerfile)
-- `/ping` version: `0e52d49febadc4416a89e2739c78d165b52ce57f` (match)
-- `/ping` now includes `"gpu": "NVIDIA GeForce RTX 4090"`
-- Smoke: passed
-
-## 12. Scale-to-zero
-
-Endpoint scaled to `min=0 max=0`; `list-endpoint-workers` confirmed 0 workers. Scale-to-zero works.
-
-## 13. Rollback
-
-Procedure:
+## 10. Rollback
 
 ```bash
-python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<previous-sha>
+python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:554871c
 ```
 
-No rebuild required; RunPod pulls the previous GHCR tag and the readiness probe checks `/ping.version`.
+No rebuild. RunPod pulls the previous immutable SHA, the template is updated, and the readiness probe verifies `/ping.version == 554871c...`. Verified successfully.
 
-## 14. Security and credentials
+## 11. Scale-to-zero
 
-- Local PAT received the `workflow` scope only for the one-time push of `.github/workflows/gpu-worker-build.yml`. No `write:packages` was added locally.
+After benchmarking, the endpoint was scaled to `min=0 max=0`. `list-endpoint-workers` confirmed 0 workers. No billable worker remained active.
+
+## 12. Security and credentials
+
+- The local GitHub PAT was temporarily granted `workflow` scope only for the one-time push of `.github/workflows/gpu-worker-build.yml`. No `write:packages` scope was added locally.
 - GHCR publication uses the repository `GITHUB_TOKEN` with `packages: write`.
 - `RUNPOD_API_KEY` is read from the environment and never logged.
-- The local `workflow` scope can be removed now.
+- The temporary `workflow` scope can now be removed.
 
-## 15. Remaining work
+## 13. Local tests
 
-1. Run the corrected Dockerfile through CI and verify a true code-only cache hit (heavy layers unchanged, only the final `ENV WORKER_VERSION` layer rebuilds).
-2. Deploy the fixed image and measure cold/warm behavior.
-3. Roll back to `554871c` or `0e52d49` and verify version.
-4. Remove the temporary `workflow` scope from the local PAT.
+- `python -m pytest src/qa/tests/test_qa.py` — 15 passed.
+- `python -m pytest scripts/tests/test_check_runpod_worker.py` — 10 passed.
+
+## 14. Remaining operational notes
+
+- The `type=gha` cache is now correctly configured and gives sub-3-minute code-only builds.
+- RunPod cold start is dominated by pulling the 5.25 GB image. Options to reduce further:
+  - Use a smaller CUDA base or freeze a worker base image in RunPod.
+  - Split into a `tout-baigne-worker-base` image with CUDA/PyTorch/Demucs/model and a thin worker image `FROM` that base; RunPod will only pull the thin worker layer.
+  - Use a network volume with the model and application pre-populated.
+- The current setup is production-usable and fully automated from `git push` to version-verified deployment.
