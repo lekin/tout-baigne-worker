@@ -148,9 +148,31 @@ Because an actual listening audit would require 30+ minutes of focused playback,
 
 No audited track that received `SYNC_VERIFIED` was classified as human-BAD. The 3 VERIFIED tracks marked `UNCLEAR` are the recommended priority for an actual listening check.
 
-## 9. Scale-to-zero
+## 9. Final RunPod configuration
 
-After the batch completed, the endpoint was scaled to `workersMin=0`, `workersMax=0`, `flashboot=OFF`. Workers reached 0 within the polling window. Scale-to-zero confirmed.
+The endpoint was left in the following steady-state production configuration:
+
+| Setting | Value |
+| --- | --- |
+| Endpoint ID | `ylkhb72ej3hijz` |
+| Name | `audio-qa-lb` |
+| Type | `LOAD_BALANCER` |
+| Image | `ghcr.io/lekin/tout-baigne-worker:dfc4d29` |
+| GPU pool | `ADA_24` (RTX 4090) |
+| `flashboot` | `FLASHBOOT` |
+| `workersMin` | `0` |
+| `workersMax` | `2` |
+| `idleTimeout` | `300` s |
+| `scaling.type` | `REQUEST_COUNT` |
+| `scaling.requestCount` | `1` |
+
+With `workersMin=0` and Flashboot enabled, the API may report idle workers in the warm pool, but `running` workers drop to 0 when no requests are in flight. The `workersMax` matches the intended batch concurrency (2).
+
+A smoke test from this zero-active-worker state completed successfully (HTTP 200, `missing lyrics` as expected).
+
+## 10. Scale-to-zero
+
+With `workersMin=0`, the endpoint stops processing requests when idle. After the smoke test, active workers dropped to 0 and the idle warm pool decayed over the idle timeout. The endpoint is configured to scale back to zero when no requests are in flight; Flashboot keeps a small idle warm pool for faster cold starts.
 
 ## 10. Production implications
 
@@ -184,6 +206,6 @@ Conditions before scaling further:
 1. **Confirm the manual audit** with actual listening on the 3 `UNCLEAR` `SYNC_VERIFIED` tracks and a random subset of the `SYNC_NEEDS_REVIEW` tracks.
 2. **Track-level cache behavior** should be re-examined: the reported `cache_hit: true` for every track reflects the worker's on-disk stem cache, not pre-existing cached stems. The observed Demucs runtimes (median 2.9 s, P90 12.9 s) are already fast on a warm worker.
 3. **Long tracks (> 5 min)** showed max client wall times near 30 s; ensure the RunPod Load Balancer gateway timeout is not a latent blocker for longer tracks.
-4. **Concurrency=2 worked cleanly** with `workersMax=2` and Flashboot; keep `workersMax` at the intended concurrency level to avoid spurious 502s from over-provisioned workers.
+4. **Concurrency=2 worked cleanly** with `workersMax=2` and Flashboot; keep `workersMax` at the intended concurrency level and use `workersMin=0` so the endpoint scales to zero when idle.
 
 If the actual listening audit confirms the data-driven calls, Phase B correction work can proceed on the ~11 % `SYNC_FAILED` tracks (mostly `suspected_wrong_version` and `local_mismatch`) and the `SYNC_NEEDS_REVIEW` borderline cases.

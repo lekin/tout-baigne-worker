@@ -48,6 +48,12 @@
 - GPU pool: `ADA_24` (NVIDIA GeForce RTX 4090)
 - Port: `8000/http` with `PORT=8000`, `PORT_HEALTH=8000`, `HEALTH_CHECK_PATH=/ping`
 - Startup args: `python3 -u /app/worker/handler.py`
+- Scaling: `REQUEST_COUNT` with `requestCount: 1`
+- `flashboot`: `FLASHBOOT`
+- `workersMin`: `0`
+- `workersMax`: `2`
+- `idleTimeout`: `300`
+- Notes: with `workersMin=0` and Flashboot, the API may report idle workers in the warm pool, but `running` workers go to 0 when no requests are in flight. Set `workersMax` to the intended concurrency (2 for the batch runner).
 
 ### Build & deploy workflow
 

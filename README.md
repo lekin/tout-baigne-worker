@@ -53,6 +53,19 @@ python scripts/deploy_runpod_worker.py ghcr.io/lekin/tout-baigne-worker:<previou
 
 No rebuild is required.
 
+## Steady-state production configuration
+
+- Endpoint: `ylkhb72ej3hijz` (`audio-qa-lb`)
+- Image: `ghcr.io/lekin/tout-baigne-worker:<sha>` (currently `dfc4d29`)
+- GPU pool: `ADA_24` (RTX 4090)
+- `flashboot`: `FLASHBOOT`
+- `workersMin`: `0`
+- `workersMax`: `2`
+- `idleTimeout`: `300`
+- `scaling`: `REQUEST_COUNT` with `requestCount: 1`
+
+With this setup the endpoint keeps a small **idle** warm pool (flashboot) so first requests start quickly; active workers scale down to zero when idle.
+
 ## Local debugging (not the normal production path)
 
 ```bash
