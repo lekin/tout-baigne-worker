@@ -43,6 +43,7 @@ class AudioQARequest:
     lyrics_language: Optional[str] = None
     transform: Dict[str, float] = field(default_factory=dict)
     source_duration_ms: Optional[float] = None
+    separator_backend: Optional[str] = None  # pytorch_demucs, audio_separator, ...
     separator_model: str = "htdemucs"
     separator_overlap: float = 0.10
     separator_shifts: int = 0
@@ -67,6 +68,7 @@ class AudioQARequest:
         # flat fields we already support.
         if "separator" in data and isinstance(data["separator"], dict):
             sep = data.pop("separator")
+            data.setdefault("separator_backend", sep.get("backend"))
             data.setdefault("separator_model", sep.get("model", "htdemucs"))
             data.setdefault("separator_overlap", sep.get("overlap", 0.10))
             data.setdefault("separator_shifts", sep.get("shifts", 0))
@@ -88,11 +90,39 @@ class AudioQARequest:
 
     def separator_config(self) -> Dict[str, Any]:
         return {
+            "backend": self.separator_backend,
             "model": self.separator_model,
             "overlap": self.separator_overlap,
             "shifts": self.separator_shifts,
             "split": self.separator_split,
         }
+
+    def resolve_separator(self) -> Dict[str, Any]:
+        """Resolve separator backend and concrete model filename.
+
+        Friendly aliases (mdx23c, melband_roformer, bs_roformer, demucs/htdemucs)
+        are mapped to concrete model filenames / backends.
+        """
+        from src.qa.separator import AUDIO_SEPARATOR_ALIASES, resolve_audio_separator_model
+
+        model = self.separator_model.lower()
+
+        # Demucs models -> keep the existing PyTorch Demucs pipeline.
+        if model in ("htdemucs", "hdemucs_mmi") or self.separator_backend == "pytorch_demucs":
+            return {"backend": "pytorch_demucs", "model": self.separator_model}
+
+        # If an explicit audio_separator backend or filename is provided, use it.
+        if self.separator_backend == "audio_separator" or resolve_audio_separator_model(self.separator_model) != self.separator_model:
+            return {"backend": "audio_separator", "model": resolve_audio_separator_model(self.separator_model)}
+
+        # Fallback for legacy "demucs" alias.
+        if model == "demucs":
+            return {"backend": "pytorch_demucs", "model": "htdemucs"}
+
+        # Default.
+        if self.separator_backend:
+            return {"backend": self.separator_backend, "model": self.separator_model}
+        return {"backend": "pytorch_demucs", "model": self.separator_model}
 
 
 @dataclass
@@ -160,7 +190,7 @@ def _import_qa_modules():
     from src.qa.gates import evaluate_gates
     from src.qa.models import LyricLine, LyricWord, StructuredLyrics, TimelineTransform
     from src.qa.scoring import compute_sync_metrics
-    from src.qa.separator import PyTorchDemucsSeparator, VocalSeparationConfig
+    from src.qa.separator import get_vocal_separator, VocalSeparationConfig
     from src.qa.structural import StructuralAnalyzer
 
     return {
@@ -172,7 +202,7 @@ def _import_qa_modules():
         "StructuredLyrics": StructuredLyrics,
         "TimelineTransform": TimelineTransform,
         "compute_sync_metrics": compute_sync_metrics,
-        "PyTorchDemucsSeparator": PyTorchDemucsSeparator,
+        "get_vocal_separator": get_vocal_separator,
         "VocalSeparationConfig": VocalSeparationConfig,
         "StructuralAnalyzer": StructuralAnalyzer,
     }
@@ -304,7 +334,7 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
     """Run Demucs + Structural QA for a single candidate."""
     mods = _import_qa_modules()
     VocalSeparationConfig = mods["VocalSeparationConfig"]
-    PyTorchDemucsSeparator = mods["PyTorchDemucsSeparator"]
+    get_vocal_separator = mods["get_vocal_separator"]
     StructuralAnalyzer = mods["StructuralAnalyzer"]
     TimelineTransform = mods["TimelineTransform"]
     compute_sync_metrics = mods["compute_sync_metrics"]
@@ -389,17 +419,39 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
 
         # Vocal separation.
         device = _resolve_device()
-        logger.info("[%s] Separating vocals with %s on %s", record_id, request.separator_model, device)
+        sep_info = request.resolve_separator()
+        logger.info("[%s] Separating vocals with backend=%s model=%s on %s", record_id, sep_info["backend"], sep_info["model"], device)
 
-        sep_config = VocalSeparationConfig(
-            backend="pytorch_demucs",
-            model=request.separator_model,
-            overlap=request.separator_overlap,
-            shifts=request.separator_shifts,
-            split=request.separator_split,
-            device=device,
-            package_version=None,
-        )
+        package_version = None
+        if sep_info["backend"] == "pytorch_demucs":
+            package_version = getattr(__import__("demucs", fromlist=["__version__"]), "__version__", "unknown")
+        elif sep_info["backend"] == "audio_separator":
+            try:
+                package_version = __import__("audio_separator").__version__
+            except Exception:
+                package_version = "unknown"
+
+        # audio-separator does not use overlap/shifts/split the same way Demucs does.
+        if sep_info["backend"] == "audio_separator":
+            sep_config = VocalSeparationConfig(
+                backend=sep_info["backend"],
+                model=sep_info["model"],
+                overlap=0.0,
+                shifts=0,
+                split=False,
+                device=device,
+                package_version=package_version,
+            )
+        else:
+            sep_config = VocalSeparationConfig(
+                backend=sep_info["backend"],
+                model=sep_info["model"],
+                overlap=request.separator_overlap,
+                shifts=request.separator_shifts,
+                split=request.separator_split,
+                device=device,
+                package_version=package_version,
+            )
 
         from src.qa.cache import hash_audio_file
 
@@ -412,12 +464,12 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
             timings["separation_ms"] = 0.0
         else:
             t0 = time.time()
-            sep = PyTorchDemucsSeparator(device=device)
+            sep = get_vocal_separator(sep_config)
             ok = sep.separate(audio_path, stem_cache_path, sep_config)
             if not ok:
                 return fail(AudioQAErrorType.demucs_error, "vocal_separation_failed")
             timings["separation_ms"] = (time.time() - t0) * 1000.0
-            logger.info("[%s] Demucs completed in %.1f ms", record_id, timings["separation_ms"])
+            logger.info("[%s] Vocal separation completed in %.1f ms", record_id, timings["separation_ms"])
             if stem_cache_path.exists():
                 cache_hit = True
 
@@ -473,8 +525,8 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
             metrics=_to_json(metrics),
             gates=_to_json(gate_results),
             separator={
-                "backend": "pytorch_demucs",
-                "model": request.separator_model,
+                "backend": sep_info["backend"],
+                "model": sep_info["model"],
                 "overlap": request.separator_overlap,
                 "shifts": request.separator_shifts,
                 "split": request.separator_split,
@@ -483,7 +535,7 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
                 "stem_reference": stem_reference,
                 "stem_duration_ms": stem_duration_ms,
                 "stem_delta_ms": stem_delta_ms,
-                "demucs_version": getattr(__import__("demucs", fromlist=["__version__"]), "__version__", "unknown"),
+                "package_version": package_version or "unknown",
             },
             worker={
                 "gpu": gpu_name or (torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"),

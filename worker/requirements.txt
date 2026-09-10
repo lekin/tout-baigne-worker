@@ -3,6 +3,7 @@
 
 # Core audio / ML
 demucs==4.0.1
+audio-separator==0.47.0
 scipy==1.14.0
 numpy==1.26.4
 soundfile==0.12.1

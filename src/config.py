@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     pennylane_access_token: Optional[str] = None
     pennylane_base_url: str = "https://app.pennylane.com/api/external/v2"
 
+    # Brevo API (newsletter campaign stats)
+    brevo_api_key: Optional[str] = None
+
     # Twilio WhatsApp Notifications (optional)
     twilio_account_sid: Optional[str] = None
     twilio_auth_token: Optional[str] = None
@@ -73,6 +76,7 @@ class Settings(BaseSettings):
     qa_vocal_overlap: float = 0.25
     qa_vocal_split: bool = True
     qa_mlx_venv: str = ".venv_bench_mlx"
+    qa_audio_separator_model_dir: str = "/workspace/audio-separator-models"
     qa_max_line_start_median_ms: float = 200.0
     qa_max_line_start_p90_ms: float = 300.0
     qa_max_line_start_single_ms: float = 1500.0

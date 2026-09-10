@@ -21,6 +21,7 @@ ENV PIP_NO_CACHE_DIR=1
 ENV TORCH_HOME=/app/.torch_home
 ENV QA_CACHE_DIR=/workspace/qa_cache
 ENV QA_WORK_DIR=/workspace/runpod_qa_work
+ENV QA_AUDIO_SEPARATOR_MODEL_DIR=/app/.audio_separator_models
 ENV PRELOAD_DEMUCS_MODELS=htdemucs
 
 # Install system dependencies: Python, pip, ffmpeg, libsndfile.
@@ -59,6 +60,28 @@ model_name = __import__('os').environ.get("PRELOAD_DEMUCS_MODELS", "htdemucs").s
 print(f"Preloading Demucs model: {model_name}")
 get_model(model_name)
 print("Preload complete")
+PY
+
+# Pre-download python-audio-separator models used in production.
+# Keep this layer before copying src/worker so code-only changes do not invalidate it.
+ENV AUDIO_SEPARATOR_MODEL_DIR=/app/.audio_separator_models
+RUN mkdir -p /app/.audio_separator_models && python3 - <<'PY'
+from audio_separator.separator import Separator
+models = [
+    "MDX23C-8KFFT-InstVoc_HQ.ckpt",
+    "melband_roformer_big_beta4.ckpt",
+]
+for model_name in models:
+    print(f"Preloading audio-separator model: {model_name}")
+    sep = Separator(
+        model_file_dir="/app/.audio_separator_models",
+        output_dir="/tmp",
+        output_single_stem="Vocals",
+        use_native_fp16=False,
+        use_torch_compile=False,
+    )
+    sep.load_model(model_name)
+    print(f"  -> {model_name} ready")
 PY
 
 # Copy the runtime source code needed by the worker.

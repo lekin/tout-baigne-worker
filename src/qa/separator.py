@@ -1,14 +1,16 @@
 """Vocal-separation backends for QA with content-addressed caching."""
 import hashlib
 import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol, Union
+from typing import Any, Dict, List, Optional, Protocol, Union
 
 import torch
 import torchaudio
@@ -17,6 +19,8 @@ from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
 from src.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -251,8 +255,105 @@ class MLXDemucsSeparator:
             return False
 
 
+# Friendly aliases for python-audio-separator model filenames.
+AUDIO_SEPARATOR_ALIASES: Dict[str, str] = {
+    "mdx23c": "MDX23C-8KFFT-InstVoc_HQ.ckpt",
+    "melband_roformer": "melband_roformer_big_beta4.ckpt",
+    "bs_roformer": "bs_roformer_vocals_resurrection_unwa.ckpt",
+}
+
+
+def resolve_audio_separator_model(model: str) -> str:
+    """Return a concrete model filename, mapping friendly aliases if needed."""
+    return AUDIO_SEPARATOR_ALIASES.get(model, model)
+
+
+class PythonAudioSeparator:
+    """Unified audio-separator backend (python-audio-separator package).
+
+    Supports MDX, MDXC/RoFormer and Demucs models with a single pipeline.
+    Models are loaded on first use and cached per filename in a class-level map.
+    """
+
+    name = "audio_separator"
+    _SEPARATOR_CACHE: Dict[str, Any] = {}
+
+    def __init__(self, device: Optional[str] = None):
+        self.device = device
+
+    def _resolve_device(self) -> Optional[str]:
+        if self.device:
+            return self.device
+        if torch.cuda.is_available():
+            return "cuda"
+        return None
+
+    def _get_separator(self, model_filename: str, model_file_dir: Path, output_dir: Path) -> Any:
+        from audio_separator.separator import Separator
+
+        cache_key = f"{model_filename}:{model_file_dir}"
+        if cache_key not in self._SEPARATOR_CACHE:
+            use_cuda = torch.cuda.is_available()
+            sep = Separator(
+                log_level=logging.WARNING,
+                model_file_dir=str(model_file_dir),
+                output_dir=str(output_dir),
+                output_format="WAV",
+                output_single_stem="Vocals",
+                sample_rate=44100,
+                use_native_fp16=use_cuda,
+                use_torch_compile=use_cuda,
+            )
+            sep.load_model(model_filename)
+            self._SEPARATOR_CACHE[cache_key] = sep
+        return self._SEPARATOR_CACHE[cache_key]
+
+    def separate(
+        self,
+        audio_path: Union[str, Path],
+        output_path: Union[str, Path],
+        config: VocalSeparationConfig,
+    ) -> bool:
+        from audio_separator import __version__ as audio_sep_version
+
+        model_filename = resolve_audio_separator_model(config.model)
+
+        # Model download/preload directory.
+        model_file_dir = Path(settings.qa_audio_separator_model_dir or "/workspace/audio-separator-models")
+        model_file_dir.mkdir(parents=True, exist_ok=True)
+
+        # Temporary output directory to isolate files.
+        output_dir = Path(tempfile.mkdtemp(prefix="audio-sep-"))
+        try:
+            sep = self._get_separator(model_filename, model_file_dir, output_dir)
+            output_files: List[str] = sep.separate(str(audio_path))
+            if not output_files:
+                logger.error("audio-separator returned no output files")
+                return False
+
+            # Use the first (and usually only) file produced.
+            vocals_path = Path(output_files[0])
+            if not vocals_path.exists():
+                logger.error("audio-separator output file not found: %s", vocals_path)
+                return False
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(vocals_path, output_path)
+            return os.path.getsize(output_path) > 1000
+        except Exception as e:
+            logger.exception("audio-separator separation failed: %s", e)
+            return False
+        finally:
+            try:
+                shutil.rmtree(output_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+
 def get_vocal_separator(config: VocalSeparationConfig, mlx_venv: Optional[Path] = None) -> VocalSeparator:
     """Return the appropriate separator for the given configuration."""
+    if config.backend == "audio_separator":
+        return PythonAudioSeparator(device=config.device)
     if config.backend == "ffmpeg":
         return FFmpegVocalSeparator()
     if config.backend.startswith("mlx"):
