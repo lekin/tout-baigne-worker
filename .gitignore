@@ -61,6 +61,7 @@ tools/
 .git/
 
 # Embedded apps
+admin/
 backstage/
 
 # Project docs (too many in root; keep only README and AGENTS)
