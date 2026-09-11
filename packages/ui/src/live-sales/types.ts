@@ -32,6 +32,8 @@ export interface SalesEvent {
   id: string;
   name: string;
   date: string;
+  // Real end datetime (Airtable "End date"); an event stays listed until this passes.
+  end_date?: string;
   venue: string;
   venue_city?: string;
   brand_name: string;
