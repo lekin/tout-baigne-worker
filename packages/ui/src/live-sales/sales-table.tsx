@@ -227,7 +227,7 @@ export function SalesTable({
         case "time":
           return compareNum(eventTimeMinutes(a.start_time), eventTimeMinutes(b.start_time), dir);
         case "weather":
-          return compareNum(a.weather_temp, b.weather_temp, dir);
+          return compareNum(a.weather_start_temp, b.weather_start_temp, dir);
         case "conjoncture":
           return dir * (conjonctureOrder(a.conjoncture_status) - conjonctureOrder(b.conjoncture_status));
         case "sold":
@@ -404,7 +404,7 @@ export function SalesTable({
                             color: "#0f172a",
                           }}
                         >
-                          {TREND_LABELS[event.trend_status] ?? event.trend_label}
+                          {TREND_LABELS[event.trend_status] ?? event.trend_status}
                         </Badge>
                       ) : (
                         <span className="block text-center text-muted-foreground">—</span>
@@ -431,10 +431,26 @@ export function SalesTable({
                     <TableCell>{formatDate(event.date)}</TableCell>
                     <TableCell>{formatTime(event.start_time)}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">
-                      {event.weather_temp !== undefined && event.weather_temp !== null ? (
-                        <span className="text-sm">
-                          {Math.round(event.weather_temp)}°C
-                          {event.weather_label ? ` ${event.weather_label}` : ""}
+                      {event.weather_start_temp !== undefined &&
+                      event.weather_start_temp !== null ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs">
+                          {event.weather_sky_emoji && (
+                            <span aria-label={event.weather_sky_label}>{event.weather_sky_emoji}</span>
+                          )}
+                          <span>
+                            {Math.round(event.weather_start_temp)}°C →{" "}
+                            {event.weather_end_temp !== null && event.weather_end_temp !== undefined
+                              ? `${Math.round(event.weather_end_temp)}°C`
+                              : "—"}
+                          </span>
+                        </span>
+                      ) : event.weather_available_from ? (
+                        <span className="inline-flex rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground">
+                          Prév. le{" "}
+                          {new Date(event.weather_available_from).toLocaleDateString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                          })}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
