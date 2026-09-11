@@ -39,12 +39,15 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
 
 // Shared sortable/searchable sales table — same columns and French labels
 // as the Admin live-sales table, driven by the minimal SalesEvent shape.
+// `eventHref` is a template like "/events/{id}" — the client builds the
+// final href per row, so no function needs to cross the server/client
+// boundary.
 export function SalesTable({
   events,
-  getEventHref,
+  eventHref = "/events/{id}",
 }: {
   events: SalesEvent[];
-  getEventHref?: (event: SalesEvent) => string;
+  eventHref?: string;
 }) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
@@ -128,7 +131,7 @@ export function SalesTable({
               </tr>
             ) : (
               rows.map((e) => {
-                const href = getEventHref?.(e);
+                const href = eventHref.replace("{id}", encodeURIComponent(e.id));
                 return (
                   <tr key={e.id} className="border-b last:border-0">
                     <td className="px-3 py-2">
