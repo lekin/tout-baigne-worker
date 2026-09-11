@@ -785,9 +785,17 @@ export function SalesTable({
       group.items.push(event);
       map.set(key, group);
     }
-    return [...map.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([, group]) => ({ type: "week" as const, ...group }));
+    // Order groups by the position of their first item in the sorted list —
+    // the active sort column/direction stays visually in effect.
+    const rank = new Map<SalesEvent, number>();
+    sortedEvents.forEach((e, i) => rank.set(e, i));
+    return [...map.values()]
+      .map((group) => ({
+        type: "week" as const,
+        ...group,
+        rank: Math.min(...group.items.map((e) => rank.get(e) ?? Infinity)),
+      }))
+      .sort((a, b) => a.rank - b.rank);
   }, [sortedEvents, groupByWeek]);
 
   function handleSort(column: SortableColumn) {
