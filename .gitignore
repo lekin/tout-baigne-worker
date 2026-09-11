@@ -64,6 +64,10 @@ tools/
 admin/
 backstage/
 
+# Shared packages
+node_modules/
+*.tsbuildinfo
+
 # Project docs (too many in root; keep only README and AGENTS)
 *.md
 !README.md
