@@ -21,5 +21,6 @@ export * from "./shell/app-header";
 export * from "./shell/org-switcher";
 
 export * from "./live-sales/types";
+export * from "./live-sales/auto-refresh";
 export * from "./live-sales/period-cards";
 export * from "./live-sales/sales-table";
