@@ -48,6 +48,7 @@ class AudioQARequest:
     separator_overlap: float = 0.10
     separator_shifts: int = 0
     separator_split: bool = True
+    separator_params: Dict[str, Any] = field(default_factory=dict)
     run_structural_qa: bool = True
     run_stable_ts: bool = False
     stem_retention: str = "failures_only"  # never, failures_only, always
@@ -95,6 +96,7 @@ class AudioQARequest:
             "overlap": self.separator_overlap,
             "shifts": self.separator_shifts,
             "split": self.separator_split,
+            "params": self.separator_params,
         }
 
     def resolve_separator(self) -> Dict[str, Any]:
@@ -112,7 +114,8 @@ class AudioQARequest:
             return {"backend": "pytorch_demucs", "model": self.separator_model}
 
         # If an explicit audio_separator backend or filename is provided, use it.
-        if self.separator_backend == "audio_separator" or resolve_audio_separator_model(self.separator_model) != self.separator_model:
+        is_audio_sep_filename = str(self.separator_model).lower().endswith((".ckpt", ".onnx", ".pth"))
+        if self.separator_backend == "audio_separator" or resolve_audio_separator_model(self.separator_model) != self.separator_model or is_audio_sep_filename:
             return {"backend": "audio_separator", "model": resolve_audio_separator_model(self.separator_model)}
 
         # Fallback for legacy "demucs" alias.
@@ -427,7 +430,8 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
             package_version = getattr(__import__("demucs", fromlist=["__version__"]), "__version__", "unknown")
         elif sep_info["backend"] == "audio_separator":
             try:
-                package_version = __import__("audio_separator").__version__
+                from importlib.metadata import version
+                package_version = version("audio-separator")
             except Exception:
                 package_version = "unknown"
 
@@ -441,6 +445,7 @@ def run_audio_qa(request: AudioQARequest, work_dir: Optional[str] = None, gpu_na
                 split=False,
                 device=device,
                 package_version=package_version,
+                extra=request.separator_params,
             )
         else:
             sep_config = VocalSeparationConfig(

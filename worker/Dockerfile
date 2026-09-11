@@ -69,7 +69,7 @@ RUN mkdir -p /app/.audio_separator_models && python3 - <<'PY'
 from audio_separator.separator import Separator
 models = [
     "MDX23C-8KFFT-InstVoc_HQ.ckpt",
-    "melband_roformer_big_beta4.ckpt",
+    "MelBandRoformerSYHFTV3Epsilon.ckpt",
 ]
 for model_name in models:
     print(f"Preloading audio-separator model: {model_name}")

@@ -30,6 +30,9 @@
 - MPS PyTorch is not viable on macOS 14.5 (PyTorch `Conv1d` fails with `Output channels > 65536`); `PYTORCH_ENABLE_MPS_FALLBACK=1` does not fix it.
 - `StableTsAligner` is not reliable as the primary oracle for sung music. It can produce `global_offset` on lyric-version mismatches and `local_mismatch` even with correct lyrics. Keep `StructuralAnalyzer` as the primary aligner.
 - Vocal separation now uses `src/qa/separator.py`. Recommended config: `qa_vocal_separator = auto`, `qa_vocal_model = hdemucs_mmi`. Valid values: `demucs`/`demucs_cpu`/`demucs_mps`/`mlx`/`ffmpeg`/`auto`.
+- New `audio_separator` backend (python-audio-separator / `audio-separator==0.47.0`) exposes a common interface for MDX/MDXC/MelBand RoFormer/BS RoFormer. Use `separator_backend="audio_separator"` and `separator_model="<filename or alias>"`. Friendly aliases: `mdx23c`, `melband_roformer`, `bs_roformer`. Any `.ckpt`/`.onnx`/`.pth` filename is routed to this backend.
+- On MPS the fastest viable model so far is `kuielab_a_vocals.onnx` (~0.15x realtime on M3, `SYNC_VERIFIED`/`good` on 5 tested tracks). `MDX23C` and `MelBandRoformerSYHFTV3Epsilon` are much slower and do not beat `htdemucs` on the local benchmark. `batch_size>1` for MDX models does not help.
+- `audio_separator` architecture-specific params can be passed via `AudioQARequest.separator_params` (e.g. `{"mdx": {"batch_size": 2, ...}}`) and are included in the vocal stem cache key.
 - Vocal cache keys are now content-addressed by backend, model, package version, and settings; existing CPU `htdemucs` stems remain valid via a legacy-key fallback.
 
 ### Active plan

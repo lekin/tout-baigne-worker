@@ -258,7 +258,7 @@ class MLXDemucsSeparator:
 # Friendly aliases for python-audio-separator model filenames.
 AUDIO_SEPARATOR_ALIASES: Dict[str, str] = {
     "mdx23c": "MDX23C-8KFFT-InstVoc_HQ.ckpt",
-    "melband_roformer": "melband_roformer_big_beta4.ckpt",
+    "melband_roformer": "MelBandRoformerSYHFTV3Epsilon.ckpt",
     "bs_roformer": "bs_roformer_vocals_resurrection_unwa.ckpt",
 }
 
@@ -288,12 +288,27 @@ class PythonAudioSeparator:
             return "cuda"
         return None
 
-    def _get_separator(self, model_filename: str, model_file_dir: Path, output_dir: Path) -> Any:
+    def _get_separator(self, model_filename: str, model_file_dir: Path, output_dir: Path, config: VocalSeparationConfig) -> Any:
         from audio_separator.separator import Separator
 
-        cache_key = f"{model_filename}:{model_file_dir}"
+        params = config.extra or {}
+        params_key = json.dumps(params, sort_keys=True, default=str)
+        cache_key = f"{model_filename}:{model_file_dir}:{params_key}"
         if cache_key not in self._SEPARATOR_CACHE:
             use_cuda = torch.cuda.is_available()
+            use_mps = getattr(torch.backends.mps, "is_available", lambda: False)()
+            use_accelerated = use_cuda or use_mps
+            # torch.compile is only reliable on CUDA; MPS/CPU fall back to eager.
+            use_compile = use_cuda
+            kwargs: Dict[str, Any] = {}
+            if "mdx" in params:
+                kwargs["mdx_params"] = params["mdx"]
+            if "vr" in params:
+                kwargs["vr_params"] = params["vr"]
+            if "demucs" in params:
+                kwargs["demucs_params"] = params["demucs"]
+            if "mdxc" in params:
+                kwargs["mdxc_params"] = params["mdxc"]
             sep = Separator(
                 log_level=logging.WARNING,
                 model_file_dir=str(model_file_dir),
@@ -301,8 +316,9 @@ class PythonAudioSeparator:
                 output_format="WAV",
                 output_single_stem="Vocals",
                 sample_rate=44100,
-                use_native_fp16=use_cuda,
-                use_torch_compile=use_cuda,
+                use_native_fp16=use_accelerated,
+                use_torch_compile=use_compile,
+                **kwargs,
             )
             sep.load_model(model_filename)
             self._SEPARATOR_CACHE[cache_key] = sep
@@ -314,7 +330,11 @@ class PythonAudioSeparator:
         output_path: Union[str, Path],
         config: VocalSeparationConfig,
     ) -> bool:
-        from audio_separator import __version__ as audio_sep_version
+        try:
+            from importlib.metadata import version
+            audio_sep_version = version("audio-separator")
+        except Exception:
+            audio_sep_version = "unknown"
 
         model_filename = resolve_audio_separator_model(config.model)
 
@@ -325,14 +345,15 @@ class PythonAudioSeparator:
         # Temporary output directory to isolate files.
         output_dir = Path(tempfile.mkdtemp(prefix="audio-sep-"))
         try:
-            sep = self._get_separator(model_filename, model_file_dir, output_dir)
+            sep = self._get_separator(model_filename, model_file_dir, output_dir, config)
             output_files: List[str] = sep.separate(str(audio_path))
             if not output_files:
                 logger.error("audio-separator returned no output files")
                 return False
 
             # Use the first (and usually only) file produced.
-            vocals_path = Path(output_files[0])
+            # audio-separator returns paths relative to output_dir for some models.
+            vocals_path = Path(sep.output_dir) / Path(output_files[0]).name
             if not vocals_path.exists():
                 logger.error("audio-separator output file not found: %s", vocals_path)
                 return False
