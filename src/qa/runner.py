@@ -473,6 +473,13 @@ class KaraokeQARunner:
         elif backend == "mlx":
             package_version = "demucs-mlx"
             device = None
+        elif backend == "audio_separator":
+            try:
+                from importlib.metadata import version
+                package_version = version("audio-separator")
+            except Exception:
+                package_version = "unknown"
+            device = None
         else:
             device = None
 

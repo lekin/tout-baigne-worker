@@ -130,20 +130,38 @@ def main():
     # Ensure model download cache lives in a stable location for this venv.
     os.environ.setdefault("QA_AUDIO_SEPARATOR_MODEL_DIR", "/tmp/audio-separator-models")
 
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     airtable = AirtableClient()
     results = []
 
+    def _save() -> None:
+        output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False))
+
     for rid in args.record_ids:
-        record = airtable.get_record(rid)
+        try:
+            record = airtable.get_record(rid)
+        except Exception as exc:
+            print(f"\n=== {rid} === Airtable fetch failed: {exc}")
+            results.append({"record_id": rid, "model": None, "error": f"airtable: {exc}"})
+            _save()
+            continue
         artist = record["fields"].get("Artist (string)", "")
         title = record["fields"].get("Title", "")
         print(f"\n=== {artist} — {title} ({rid}) ===")
         for model in args.models:
             print(f"\n-- Model: {model} --")
-            req = _make_request(record, model, separator_params=separator_params)
-            t0 = time.monotonic()
-            result = run_audio_qa(req)
-            elapsed = time.monotonic() - t0
+            try:
+                req = _make_request(record, model, separator_params=separator_params)
+                t0 = time.monotonic()
+                result = run_audio_qa(req)
+                elapsed = time.monotonic() - t0
+            except Exception as exc:
+                print(f"  error: {exc}")
+                results.append({"record_id": rid, "artist": artist, "title": title, "model": model, "error": str(exc)})
+                _save()
+                continue
 
             metrics = result.metrics or {}
             line_start = metrics.get("line_start", {})
@@ -165,10 +183,8 @@ def main():
             }
             results.append(summary)
             print(json.dumps(summary, indent=2, ensure_ascii=False))
+            _save()
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(results, indent=2, ensure_ascii=False))
     print(f"\nSaved {len(results)} results to {output_path}")
 
 

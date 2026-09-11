@@ -260,6 +260,8 @@ AUDIO_SEPARATOR_ALIASES: Dict[str, str] = {
     "mdx23c": "MDX23C-8KFFT-InstVoc_HQ.ckpt",
     "melband_roformer": "MelBandRoformerSYHFTV3Epsilon.ckpt",
     "bs_roformer": "bs_roformer_vocals_resurrection_unwa.ckpt",
+    "kuielab": "kuielab_a_vocals.onnx",
+    "kuielab_a_vocals": "kuielab_a_vocals.onnx",
 }
 
 

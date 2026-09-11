@@ -68,6 +68,7 @@ ENV AUDIO_SEPARATOR_MODEL_DIR=/app/.audio_separator_models
 RUN mkdir -p /app/.audio_separator_models && python3 - <<'PY'
 from audio_separator.separator import Separator
 models = [
+    "kuielab_a_vocals.onnx",
     "MDX23C-8KFFT-InstVoc_HQ.ckpt",
     "MelBandRoformerSYHFTV3Epsilon.ckpt",
 ]

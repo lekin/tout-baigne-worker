@@ -44,7 +44,7 @@ class AudioQARequest:
     transform: Dict[str, float] = field(default_factory=dict)
     source_duration_ms: Optional[float] = None
     separator_backend: Optional[str] = None  # pytorch_demucs, audio_separator, ...
-    separator_model: str = "htdemucs"
+    separator_model: str = "kuielab_a_vocals.onnx"
     separator_overlap: float = 0.10
     separator_shifts: int = 0
     separator_split: bool = True
@@ -70,7 +70,7 @@ class AudioQARequest:
         if "separator" in data and isinstance(data["separator"], dict):
             sep = data.pop("separator")
             data.setdefault("separator_backend", sep.get("backend"))
-            data.setdefault("separator_model", sep.get("model", "htdemucs"))
+            data.setdefault("separator_model", sep.get("model", "kuielab_a_vocals.onnx"))
             data.setdefault("separator_overlap", sep.get("overlap", 0.10))
             data.setdefault("separator_shifts", sep.get("shifts", 0))
             data.setdefault("separator_split", sep.get("split", True))
