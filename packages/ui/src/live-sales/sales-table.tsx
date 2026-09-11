@@ -8,9 +8,11 @@ import {
   ArrowUpDown,
   CalendarDays,
   ExternalLink,
+  Wind,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { CellTooltip } from "../ui/cell-tooltip";
 import {
   Table,
   TableBody,
@@ -19,9 +21,10 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import type { SalesEvent } from "./types";
+import type { SalesEvent, TrendComparison } from "./types";
+import { WeatherChart } from "./weather-chart";
 
-type SortableColumn =
+export type SortableColumn =
   | "days"
   | "trend"
   | "status"
@@ -36,7 +39,7 @@ type SortableColumn =
   | "percentage"
   | "link";
 
-type SortDirection = "asc" | "desc";
+export type SortDirection = "asc" | "desc";
 
 function formatDate(value: string): string {
   if (!value) return "—";
@@ -88,6 +91,20 @@ function salesStatusVariant(status?: string) {
   return "outline" as const;
 }
 
+// Mirrors Admin's lib/daily-sales/benchmark.ts classifyRatio.
+function classifyRatio(
+  primaryTotal: number,
+  benchmarkTotal: number
+): "ahead" | "on_track" | "behind" {
+  if (benchmarkTotal === 0) {
+    return primaryTotal > 0 ? "ahead" : "on_track";
+  }
+  const ratio = primaryTotal / benchmarkTotal;
+  if (ratio >= 1.2) return "ahead";
+  if (ratio <= 0.8) return "behind";
+  return "on_track";
+}
+
 const TREND_LABELS: Record<string, string> = {
   ahead: "En avance",
   on_track: "On track",
@@ -100,29 +117,74 @@ const TREND_COLORS: Record<string, string> = {
   behind: "#f87171",
 };
 
-const CONJONCTURE_LABELS: Record<string, string> = {
-  favorable: "Favorable",
-  mixed: "Mitigé",
-  neutral: "Neutre",
-  unfavorable: "Défavorable",
-  unknown: "—",
+const BENCHMARK_LABELS: Record<string, string> = {
+  same_period: "même période",
+  latest: "derniers events",
 };
 
-const CONJONCTURE_COLORS: Record<string, string> = {
-  favorable: "#34d399",
-  mixed: "#fbbf24",
-  neutral: "#94a3b8",
-  unfavorable: "#f87171",
-  unknown: "#94a3b8",
+const CONJONCTURE_STYLES: Record<
+  string,
+  { label: string; symbol: string; color: string }
+> = {
+  favorable: {
+    label: "Favorable",
+    symbol: "↑",
+    color: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  },
+  unfavorable: {
+    label: "Défavorable",
+    symbol: "↓",
+    color: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  },
+  mixed: {
+    label: "Mitigé",
+    symbol: "↔",
+    color: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  },
+  neutral: {
+    label: "Neutre",
+    symbol: "·",
+    color: "bg-muted text-muted-foreground",
+  },
+  unknown: {
+    label: "À vérifier",
+    symbol: "?",
+    color: "bg-muted text-muted-foreground",
+  },
 };
+
+// Same palette as Admin's lib/lifecycle.tsx (plural labels for the tooltip).
+const LIFECYCLE_STAGES: { key: string; label: string; color: string }[] = [
+  { key: "new", label: "Nouveaux", color: "#34d399" },
+  { key: "active", label: "Actifs", color: "#38bdf8" },
+  { key: "repeat", label: "Récurrents", color: "#a78bfa" },
+  { key: "loyal", label: "Fidèles", color: "#fbbf24" },
+  { key: "dormant", label: "Dormants", color: "#94a3b8" },
+  { key: "never_purchased", label: "Jamais acheté", color: "#475569" },
+];
+
+const AGE_BAND_ORDER = [
+  "14-17",
+  "18-24",
+  "25-34",
+  "35-44",
+  "45-54",
+  "55-64",
+  "65+",
+];
 
 function trendOrder(s?: string): number {
-  return s ? ({ ahead: 0, on_track: 1, behind: 2 } as Record<string, number>)[s] ?? 3 : 3;
+  return s
+    ? ({ ahead: 0, on_track: 1, behind: 2 } as Record<string, number>)[s] ?? 3
+    : 3;
 }
 
 function conjonctureOrder(s?: string): number {
   return s
-    ? ({ favorable: 0, mixed: 1, neutral: 2, unfavorable: 3, unknown: 4 } as Record<string, number>)[s] ?? 4
+    ? ({ favorable: 0, mixed: 1, neutral: 2, unfavorable: 3, unknown: 4 } as Record<
+        string,
+        number
+      >)[s] ?? 4
     : 4;
 }
 
@@ -140,8 +202,10 @@ function compareNum(
   b: number | null | undefined,
   dir: number
 ): number {
-  const aM = a === null || a === undefined || (typeof a === "number" && !Number.isFinite(a));
-  const bM = b === null || b === undefined || (typeof b === "number" && !Number.isFinite(b));
+  const aM =
+    a === null || a === undefined || (typeof a === "number" && !Number.isFinite(a));
+  const bM =
+    b === null || b === undefined || (typeof b === "number" && !Number.isFinite(b));
   if (aM && bM) return 0;
   if (aM) return 1;
   if (bM) return -1;
@@ -152,6 +216,454 @@ function compareStr(a: string, b: string, dir: number): number {
   return dir * a.localeCompare(b, "fr");
 }
 
+function temperature(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : `${Math.round(value)}°C`;
+}
+
+function TrendCell({ event }: { event: SalesEvent }) {
+  if (!event.trend_status) {
+    return <span className="block text-center text-muted-foreground">—</span>;
+  }
+  const comparisons = event.trend_comparisons ?? [];
+  return (
+    <CellTooltip
+      className="w-fit cursor-help mx-auto"
+      content={
+        <>
+          <div className="flex items-center gap-2">
+            <span
+              className="rounded px-1.5 py-0.5 font-medium"
+              style={{
+                backgroundColor: TREND_COLORS[event.trend_status],
+                color: "#0f172a",
+              }}
+            >
+              {TREND_LABELS[event.trend_status]}
+            </span>
+            <span className="font-medium">
+              {event.trend_total} vendus
+            </span>
+            <span className="text-muted-foreground">
+              à J-{event.trend_days_before}
+            </span>
+          </div>
+          {comparisons.length > 0 && (
+            <div className="mt-2 border-t border-foreground/10">
+              {comparisons.map((c) => {
+                const methodStatus = classifyRatio(
+                  event.trend_total ?? 0,
+                  c.total
+                );
+                return (
+                  <div key={c.method} className="mt-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {BENCHMARK_LABELS[c.method] ?? c.method}
+                        {c.method === event.trend_benchmark_method && (
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            · utilisé
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className="rounded px-1 py-px font-medium"
+                        style={{
+                          backgroundColor: TREND_COLORS[methodStatus],
+                          color: "#0f172a",
+                        }}
+                      >
+                        {TREND_LABELS[methodStatus]}
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground">
+                      moy. {c.total} · {c.count} event{c.count > 1 ? "s" : ""}
+                    </div>
+                    <ul className="mt-1 space-y-0.5 border-l border-foreground/10 pl-2 text-muted-foreground">
+                      {c.entries.map((b, i) => (
+                        <li key={i} className="flex justify-between gap-3">
+                          <span className="truncate">
+                            {new Date(b.date).toLocaleDateString("fr-FR", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}{" "}
+                            · {b.name}
+                          </span>
+                          <span className="font-medium tabular-nums text-foreground">
+                            {b.total}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      }
+    >
+      <div className="flex flex-col gap-0.5">
+        <Badge
+          className="w-fit"
+          style={{
+            backgroundColor: TREND_COLORS[event.trend_status],
+            color: "#0f172a",
+          }}
+        >
+          {TREND_LABELS[event.trend_status]}
+        </Badge>
+      </div>
+    </CellTooltip>
+  );
+}
+
+function WeatherCell({ event }: { event: SalesEvent }) {
+  const hasForecast =
+    event.weather_start_temp !== undefined &&
+    event.weather_start_temp !== null;
+
+  if (!hasForecast) {
+    const availableDate = event.weather_available_from
+      ? new Date(event.weather_available_from).toLocaleDateString("fr-FR", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          timeZone: "Europe/Paris",
+        })
+      : null;
+    return (
+      <CellTooltip
+        className="w-fit cursor-help rounded-full focus-visible:outline focus-visible:outline-ring"
+        content={
+          <p className="whitespace-normal">
+            {availableDate
+              ? `Prévisions attendues à partir du ${availableDate}. Open-Meteo couvre environ 15 jours ; aucune température fiable n’est encore disponible pour cet événement.`
+              : "Prévision indisponible pour le moment (lieu, date ou données météo manquants). Une nouvelle tentative sera faite automatiquement."}
+          </p>
+        }
+      >
+        <span className="inline-flex rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground">
+          {availableDate ? `Prév. le ${availableDate}` : "Météo indisponible"}
+        </span>
+      </CellTooltip>
+    );
+  }
+
+  return (
+    <CellTooltip
+      className="w-fit cursor-help rounded-full focus-visible:outline focus-visible:outline-ring"
+      contentWidth={440}
+      content={
+        <div className="space-y-3 whitespace-normal py-1">
+          <div>
+            <p className="font-semibold text-sm">
+              Météo à l’ouverture · {event.weather_opening_time ?? "—"}
+            </p>
+            {event.weather_opening_is_fallback && (
+              <p className="mt-1 text-muted-foreground">
+                Horaire d’ouverture non renseigné : heure de début utilisée.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap justify-between gap-2 border-y border-foreground/10 py-2 tabular-nums">
+            <span>
+              {temperature(event.weather_start_temp)} →{" "}
+              {temperature(event.weather_end_temp)}
+            </span>
+            <span>
+              Précipitations :{" "}
+              {event.weather_precip_total === null ||
+              event.weather_precip_total === undefined
+                ? "—"
+                : `${event.weather_precip_total.toLocaleString("fr-FR", {
+                    maximumFractionDigits: 1,
+                  })} mm`}
+            </span>
+          </div>
+          {event.weather_sky_emoji && (
+            <div className="flex items-center gap-2 text-sm">
+              <span
+                role="img"
+                aria-label={event.weather_sky_label}
+                className="text-base leading-none"
+              >
+                {event.weather_sky_emoji}
+              </span>
+              <span>{event.weather_sky_label}</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-sm tabular-nums">
+            <Wind className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>
+              Vent{" "}
+              {event.weather_wind_speed !== undefined &&
+              event.weather_wind_speed !== null
+                ? `${Math.round(event.weather_wind_speed)} km/h`
+                : "—"}
+            </span>
+          </div>
+          {event.weather_hours && event.weather_hours.length > 0 && (
+            <WeatherChart hours={event.weather_hours} />
+          )}
+        </div>
+      }
+    >
+      <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs tabular-nums">
+        {event.weather_sky_emoji && (
+          <span aria-label={event.weather_sky_label}>
+            {event.weather_sky_emoji}
+          </span>
+        )}
+        <span>
+          {temperature(event.weather_start_temp)} →{" "}
+          {temperature(event.weather_end_temp)}
+        </span>
+      </span>
+    </CellTooltip>
+  );
+}
+
+function ConjonctureCell({ event }: { event: SalesEvent }) {
+  const status = event.conjoncture_status ?? "unknown";
+  const style = CONJONCTURE_STYLES[status] ?? CONJONCTURE_STYLES.unknown;
+  const reasons = event.conjoncture_reasons ?? [];
+  const limitations = event.conjoncture_limitations ?? [];
+
+  return (
+    <CellTooltip
+      className="mx-auto w-fit cursor-help rounded-full focus-visible:outline focus-visible:outline-ring"
+      contentWidth={380}
+      content={
+        <div className="space-y-3 whitespace-normal py-1">
+          <div>
+            <p className="font-semibold text-sm">
+              Contexte calendaire · {style.label}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {event.conjoncture_city || "Ville non renseignée"}
+              {event.conjoncture_zone
+                ? ` · Zone ${event.conjoncture_zone} · Académie de ${event.conjoncture_academy}`
+                : ""}
+            </p>
+            {event.conjoncture_date && (
+              <p className="mt-1">
+                {new Date(
+                  `${event.conjoncture_date}T12:00:00Z`
+                ).toLocaleDateString("fr-FR", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                  timeZone: "Europe/Paris",
+                })}
+              </p>
+            )}
+          </div>
+          {reasons.length ? (
+            <ul className="space-y-2 border-t border-foreground/10 pt-2">
+              {reasons.map((reason, index) => (
+                <li key={index} className="space-y-0.5">
+                  <p className="font-medium">
+                    {reason.influence > 0
+                      ? "➕ "
+                      : reason.influence < 0
+                        ? "➖ "
+                        : ""}
+                    {reason.label}
+                  </p>
+                  <p className="text-muted-foreground">{reason.detail}</p>
+                  <p className="text-muted-foreground">
+                    Source :{" "}
+                    {reason.sourceUrl ? (
+                      <a
+                        href={reason.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        {reason.source}
+                      </a>
+                    ) : (
+                      reason.source
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground">
+              {status === "neutral"
+                ? "Aucun signal particulier parmi les vacances locales, ponts et jours fériés couverts."
+                : "Données insuffisantes pour qualifier cette date."}
+            </p>
+          )}
+          {limitations.map((message) => (
+            <p key={message} className="text-amber-700 dark:text-amber-300">
+              {message}
+            </p>
+          ))}
+          <p className="border-t border-foreground/10 pt-2 text-muted-foreground">
+            Hypothèses : vacances locales et ponts plutôt défavorables
+            (départs), veille de jour férié favorable. Signaux opposés : mitigé.
+            Indication de contexte, pas une prévision des ventes. Les festivals
+            sans localisation ne sont pas appliqués nationalement.
+          </p>
+        </div>
+      }
+    >
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${style.color}`}
+      >
+        <span className="text-sm">{style.symbol}</span>
+        {style.label}
+      </span>
+    </CellTooltip>
+  );
+}
+
+function DemoCell({ event }: { event: SalesEvent }) {
+  const buyers = event.demo_buyers ?? 0;
+  if (buyers === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const f = event.demo_gender_female ?? 0;
+  const m = event.demo_gender_male ?? 0;
+  const o = event.demo_gender_other ?? 0;
+  const genderKnown = f + m + o;
+  const fPct = genderKnown ? Math.round((f / genderKnown) * 100) : null;
+  const mPct = genderKnown ? Math.round((m / genderKnown) * 100) : null;
+  const oPct = genderKnown ? 100 - (fPct ?? 0) - (mPct ?? 0) : null;
+
+  const ageBands = event.demo_age_bands ?? {};
+  const bandTotal = Object.values(ageBands).reduce((a, b) => a + b, 0);
+
+  return (
+    <CellTooltip
+      className="w-fit cursor-help"
+      contentWidth={300}
+      content={
+        <div className="space-y-2">
+          <div className="font-medium">
+            {buyers.toLocaleString("fr-FR")} acheteur
+            {buyers > 1 ? "s" : ""} — source Shotgun, jamais inféré
+          </div>
+          {genderKnown > 0 && (
+            <div>
+              <div className="flex h-2 w-full overflow-hidden rounded">
+                <span style={{ width: `${fPct}%`, background: "#f472b6" }} />
+                <span style={{ width: `${mPct}%`, background: "#60a5fa" }} />
+                <span style={{ width: `${oPct}%`, background: "#a78bfa" }} />
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                {f} F ({fPct}%) · {m} H ({mPct}%)
+                {o > 0 ? ` · ${o} autre (${oPct}%)` : ""}
+              </div>
+            </div>
+          )}
+          {bandTotal > 0 && (
+            <div>
+              <div className="mb-1 font-medium">
+                Âges — moyenne {event.demo_avg_age ?? "—"} ans (
+                {event.demo_age_known
+                  ? Math.round((event.demo_age_known / buyers) * 100)
+                  : 0}
+                % connus)
+              </div>
+              <div className="space-y-0.5">
+                {AGE_BAND_ORDER.filter((b) => ageBands[b]).map((b) => (
+                  <div key={b} className="flex items-center gap-2">
+                    <span className="w-12 text-muted-foreground">{b}</span>
+                    <div className="h-1.5 flex-1 rounded bg-foreground/10">
+                      <div
+                        className="h-1.5 rounded bg-primary/70"
+                        style={{
+                          width: `${Math.round((ageBands[b] / bandTotal) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="w-8 text-right tabular-nums text-muted-foreground">
+                      {ageBands[b]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      }
+    >
+      <div className="flex w-fit items-center gap-2 rounded-full border border-foreground/15 bg-foreground/5 px-2 py-1">
+        {genderKnown > 0 ? (
+          <div
+            className="flex h-2 w-16 overflow-hidden rounded-full"
+            title={`${fPct}% F / ${mPct}% H`}
+          >
+            <span style={{ width: `${fPct}%`, background: "#f472b6" }} />
+            <span style={{ width: `${mPct}%`, background: "#60a5fa" }} />
+            {(oPct ?? 0) > 0 && (
+              <span style={{ width: `${oPct}%`, background: "#a78bfa" }} />
+            )}
+          </div>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">genre ?</span>
+        )}
+        <span className="text-xs font-medium tabular-nums whitespace-nowrap">
+          {event.demo_avg_age !== null && event.demo_avg_age !== undefined
+            ? `~${event.demo_avg_age} ans`
+            : "—"}
+        </span>
+      </div>
+    </CellTooltip>
+  );
+}
+
+function LifecycleCell({ event }: { event: SalesEvent }) {
+  const dist = event.lifecycle_dist;
+  const total = event.demo_buyers ?? 0;
+  const stages = LIFECYCLE_STAGES.filter((s) => (dist?.[s.key] ?? 0) > 0);
+  if (!dist || total === 0 || stages.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <CellTooltip
+      className="w-fit cursor-help"
+      contentWidth={240}
+      content={
+        <div className="space-y-1.5">
+          <div className="font-medium">Lifecycle des acheteurs</div>
+          {stages.map((s) => (
+            <div key={s.key} className="flex items-center gap-2">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ background: s.color }}
+              />
+              <span className="flex-1">{s.label}</span>
+              <span className="tabular-nums text-muted-foreground">
+                {dist[s.key]} · {Math.round((dist[s.key] / total) * 100)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      }
+    >
+      <div className="flex w-fit items-center rounded-full border border-foreground/15 bg-foreground/5 px-2 py-1">
+        <div className="flex h-2 w-20 overflow-hidden rounded-full">
+          {stages.map((s) => (
+            <span
+              key={s.key}
+              style={{
+                width: `${(dist[s.key] / total) * 100}%`,
+                background: s.color,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </CellTooltip>
+  );
+}
+
 export function SalesTable({
   events,
   eventHref = "/events/{id}",
@@ -159,6 +671,8 @@ export function SalesTable({
   initialGroupByWeek = false,
   initialSortColumn = null,
   initialSortDirection = "asc",
+  onSaveGroupByWeek,
+  onSaveSort,
 }: {
   events: SalesEvent[];
   eventHref?: string;
@@ -166,6 +680,12 @@ export function SalesTable({
   initialGroupByWeek?: boolean;
   initialSortColumn?: SortableColumn | null;
   initialSortDirection?: SortDirection;
+  // Server actions — each app persists prefs its own way (user_settings row).
+  onSaveGroupByWeek?: (value: boolean) => void | Promise<void>;
+  onSaveSort?: (
+    column: SortableColumn | null,
+    direction: SortDirection
+  ) => void | Promise<void>;
 }) {
   const storageKey = useMemo(
     () => (userId ? `tbp.live-sales.groupByWeek.${userId}` : null),
@@ -225,11 +745,19 @@ export function SalesTable({
         case "date":
           return dir * (new Date(a.date).getTime() - new Date(b.date).getTime());
         case "time":
-          return compareNum(eventTimeMinutes(a.start_time), eventTimeMinutes(b.start_time), dir);
+          return compareNum(
+            eventTimeMinutes(a.start_time),
+            eventTimeMinutes(b.start_time),
+            dir
+          );
         case "weather":
           return compareNum(a.weather_start_temp, b.weather_start_temp, dir);
         case "conjoncture":
-          return dir * (conjonctureOrder(a.conjoncture_status) - conjonctureOrder(b.conjoncture_status));
+          return (
+            dir *
+            (conjonctureOrder(a.conjoncture_status) -
+              conjonctureOrder(b.conjoncture_status))
+          );
         case "sold":
           return compareNum(a.sold, b.sold, dir);
         case "left":
@@ -237,7 +765,10 @@ export function SalesTable({
         case "percentage":
           return compareNum(a.percentage, b.percentage, dir);
         case "link":
-          return dir * ((a.tickets_sales_url ? 1 : 0) - (b.tickets_sales_url ? 1 : 0));
+          return (
+            dir *
+            ((a.tickets_sales_url ? 1 : 0) - (b.tickets_sales_url ? 1 : 0))
+          );
       }
       return 0;
     });
@@ -261,7 +792,11 @@ export function SalesTable({
 
   function handleSort(column: SortableColumn) {
     const nextDirection: SortDirection =
-      sortColumn === column ? (sortDirection === "asc" ? "desc" : "asc") : "asc";
+      sortColumn === column
+        ? sortDirection === "asc"
+          ? "desc"
+          : "asc"
+        : "asc";
     setSortColumn(column);
     setSortDirection(nextDirection);
     if (sortStorageKey && typeof window !== "undefined") {
@@ -270,6 +805,7 @@ export function SalesTable({
         JSON.stringify({ column, direction: nextDirection })
       );
     }
+    onSaveSort?.(column, nextDirection);
   }
 
   function sortIcon(column: SortableColumn) {
@@ -288,6 +824,7 @@ export function SalesTable({
     if (storageKey && typeof window !== "undefined") {
       window.localStorage.setItem(storageKey, String(next));
     }
+    onSaveGroupByWeek?.(next);
   }
 
   if (events.length === 0) {
@@ -304,9 +841,17 @@ export function SalesTable({
     align: "left" | "center" | "right" = "left"
   ) {
     const justify =
-      align === "right" ? "justify-end" : align === "center" ? "justify-center" : "";
+      align === "right"
+        ? "justify-end"
+        : align === "center"
+          ? "justify-center"
+          : "";
     const text =
-      align === "right" ? "text-right" : align === "center" ? "text-center" : "";
+      align === "right"
+        ? "text-right"
+        : align === "center"
+          ? "text-center"
+          : "";
     return (
       <TableHead
         className={`cursor-pointer select-none ${text}`}
@@ -386,29 +931,19 @@ export function SalesTable({
                     key={event.id}
                     className="cursor-pointer"
                     onClick={(e) => {
-                      if ((e.target as HTMLElement).closest("a, button")) return;
+                      if ((e.target as HTMLElement).closest("a, button"))
+                        return;
                       window.location.href = href;
                     }}
                   >
                     <TableCell className="font-medium">
-                      {event.days_until !== undefined && event.days_until !== null
+                      {event.days_until !== undefined &&
+                      event.days_until !== null
                         ? `D${event.days_until > 0 ? "-" : "+"}${Math.abs(event.days_until)}`
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      {event.trend_status ? (
-                        <Badge
-                          className="w-fit"
-                          style={{
-                            backgroundColor: TREND_COLORS[event.trend_status],
-                            color: "#0f172a",
-                          }}
-                        >
-                          {TREND_LABELS[event.trend_status] ?? event.trend_status}
-                        </Badge>
-                      ) : (
-                        <span className="block text-center text-muted-foreground">—</span>
-                      )}
+                      <TrendCell event={event} />
                     </TableCell>
                     <TableCell>
                       {event.sales_status ? (
@@ -431,90 +966,16 @@ export function SalesTable({
                     <TableCell>{formatDate(event.date)}</TableCell>
                     <TableCell>{formatTime(event.start_time)}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">
-                      {event.weather_start_temp !== undefined &&
-                      event.weather_start_temp !== null ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs">
-                          {event.weather_sky_emoji && (
-                            <span aria-label={event.weather_sky_label}>{event.weather_sky_emoji}</span>
-                          )}
-                          <span>
-                            {Math.round(event.weather_start_temp)}°C →{" "}
-                            {event.weather_end_temp !== null && event.weather_end_temp !== undefined
-                              ? `${Math.round(event.weather_end_temp)}°C`
-                              : "—"}
-                          </span>
-                        </span>
-                      ) : event.weather_available_from ? (
-                        <span className="inline-flex rounded-full border border-foreground/10 bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground">
-                          Prév. le{" "}
-                          {new Date(event.weather_available_from).toLocaleDateString("fr-FR", {
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <WeatherCell event={event} />
                     </TableCell>
                     <TableCell>
-                      {event.conjoncture_status && event.conjoncture_status !== "unknown" ? (
-                        <span
-                          className="text-xs font-medium"
-                          style={{ color: CONJONCTURE_COLORS[event.conjoncture_status] }}
-                        >
-                          {CONJONCTURE_LABELS[event.conjoncture_status]}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <ConjonctureCell event={event} />
                     </TableCell>
                     <TableCell>
-                      {event.demo_buyers && event.demo_buyers > 0 ? (
-                        <div className="flex items-center gap-2">
-                          {event.demo_gender_female !== undefined && event.demo_gender_male !== undefined ? (
-                            <div className="flex h-2 w-16 overflow-hidden rounded-full">
-                              <span
-                                style={{
-                                  width: `${Math.round((event.demo_gender_female / (event.demo_gender_female + event.demo_gender_male + (event.demo_gender_other ?? 0))) * 100)}%`,
-                                  background: "#f472b6",
-                                }}
-                              />
-                              <span
-                                style={{
-                                  width: `${Math.round((event.demo_gender_male / (event.demo_gender_female + event.demo_gender_male + (event.demo_gender_other ?? 0))) * 100)}%`,
-                                  background: "#60a5fa",
-                                }}
-                              />
-                            </div>
-                          ) : null}
-                          <span className="text-xs font-medium tabular-nums whitespace-nowrap">
-                            {event.demo_avg_age !== null && event.demo_avg_age !== undefined
-                              ? `~${event.demo_avg_age} ans`
-                              : "—"}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <DemoCell event={event} />
                     </TableCell>
                     <TableCell>
-                      {event.lifecycle_dist && event.demo_buyers && event.demo_buyers > 0 ? (
-                        <div className="flex h-2 w-20 overflow-hidden rounded-full">
-                          {Object.entries(event.lifecycle_dist)
-                            .filter(([, v]) => v > 0)
-                            .map(([k, v]) => (
-                              <span
-                                key={k}
-                                style={{
-                                  width: `${(v / event.demo_buyers!) * 100}%`,
-                                  background: "#94a3b8",
-                                }}
-                              />
-                            ))}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                      <LifecycleCell event={event} />
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {event.sold ?? "—"}
@@ -523,7 +984,9 @@ export function SalesTable({
                       {event.left ?? "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {event.percentage !== undefined ? `${event.percentage}%` : "—"}
+                      {event.percentage !== undefined
+                        ? `${event.percentage}%`
+                        : "—"}
                     </TableCell>
                     <TableCell>
                       {event.tickets_sales_url ? (
