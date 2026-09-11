@@ -24,3 +24,7 @@ export * from "./live-sales/types";
 export * from "./live-sales/auto-refresh";
 export * from "./live-sales/period-cards";
 export * from "./live-sales/sales-table";
+
+export * from "./assets/types";
+export * from "./assets/asset-gallery";
+export * from "./assets/visual-assets-section";

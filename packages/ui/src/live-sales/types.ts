@@ -2,6 +2,8 @@
 // Fields not available to a given consumer are left undefined and the cell
 // renders "—". Admin and Backstage use the exact same table component.
 
+import type { Asset } from "../assets/types";
+
 export interface TrendComparison {
   method: "same_period" | "latest";
   total: number;
@@ -83,4 +85,7 @@ export interface SalesEvent {
   weather_hours?: WeatherHour[];
   weather_available_from?: string;
   tickets_sales_url?: string;
+  // Partner-safe visual assets (detail view) — materialized from Airtable
+  // "Social media assets" into events.raw.assets.
+  assets?: Asset[];
 }
