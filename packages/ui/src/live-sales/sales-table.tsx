@@ -805,7 +805,16 @@ export function SalesTable({
         JSON.stringify({ column, direction: nextDirection })
       );
     }
-    onSaveSort?.(column, nextDirection);
+    if (onSaveSort) {
+      Promise.resolve(onSaveSort(column, nextDirection))
+        .then(() => {
+          // Server value is now authoritative — drop the optimistic cache.
+          if (sortStorageKey && typeof window !== "undefined") {
+            window.localStorage.removeItem(sortStorageKey);
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   function sortIcon(column: SortableColumn) {
@@ -824,7 +833,15 @@ export function SalesTable({
     if (storageKey && typeof window !== "undefined") {
       window.localStorage.setItem(storageKey, String(next));
     }
-    onSaveGroupByWeek?.(next);
+    if (onSaveGroupByWeek) {
+      Promise.resolve(onSaveGroupByWeek(next))
+        .then(() => {
+          if (storageKey && typeof window !== "undefined") {
+            window.localStorage.removeItem(storageKey);
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   if (events.length === 0) {
