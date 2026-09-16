@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     karaoke_logo_height: int = 224
     karaoke_font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf"
     karaoke_logo_path: str = "Logo-YellowDropShadow.png"
+    karaoke_overlay_dir: str = "overlays"
+    karaoke_intro_path: str = "gkda-yellow.mp4"
     
     # API Configuration
     api_host: str = "0.0.0.0"

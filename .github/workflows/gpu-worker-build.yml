@@ -9,6 +9,13 @@ on:
     paths:
       - 'worker/**'
       - 'src/qa/**'
+      - 'src/render/**'
+      - 'src/karaoke_generator.py'
+      - 'src/config.py'
+      - 'overlays/**'
+      - 'legacy/karaoke/fonts/**'
+      - 'gkda-yellow.mp4'
+      - 'Logo-YellowDropShadow.png'
       - '.github/workflows/gpu-worker-build.yml'
       - 'worker/Dockerfile'
       - 'worker/requirements.txt'

@@ -15,6 +15,10 @@ pydantic-settings==2.4.0
 python-dotenv==1.0.1
 pyyaml==6.0.1
 
+# YouTube download fallback for the render pipeline (imported at module level
+# by src/karaoke_generator.py)
+yt-dlp==2024.12.13
+
 # Web server (Load Balancer)
 fastapi==0.112.0
 uvicorn==0.30.5

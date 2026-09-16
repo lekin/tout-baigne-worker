@@ -24,7 +24,8 @@ ENV QA_WORK_DIR=/workspace/runpod_qa_work
 ENV QA_AUDIO_SEPARATOR_MODEL_DIR=/app/.audio_separator_models
 ENV PRELOAD_DEMUCS_MODELS=htdemucs
 
-# Install system dependencies: Python, pip, ffmpeg, libsndfile.
+# Install system dependencies: Python, pip, ffmpeg, libsndfile, fontconfig
+# (fontconfig is required by ffmpeg's libass subtitle filter).
 RUN apt-get update -qq \
     && apt-get install -y -qq \
         python3.10 \
@@ -32,6 +33,8 @@ RUN apt-get update -qq \
         ffmpeg \
         libsndfile1 \
         curl \
+        fontconfig \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Symlink python3.10 as python3 / python for convenience.
@@ -88,6 +91,27 @@ PY
 # Copy the runtime source code needed by the worker.
 COPY src /app/src
 COPY worker /app/worker
+
+# Karaoke render assets (definitive /render pipeline):
+# - SpaceMono font: baked at the SAME relative path used in generated ASS
+#   Fontname fields (legacy/karaoke/fonts/SpaceMono-Regular.ttf) AND installed
+#   into fontconfig so libass can resolve the family name.
+# - Logo, GKDA intro clip, effect overlays.
+COPY legacy/karaoke/fonts /app/legacy/karaoke/fonts
+COPY legacy/karaoke/fonts /usr/share/fonts/truetype/spacemono
+COPY Logo-YellowDropShadow.png /app/Logo-YellowDropShadow.png
+COPY gkda-yellow.mp4 /app/gkda-yellow.mp4
+COPY overlays /app/overlays
+RUN fc-cache -f \
+    && ffmpeg -hide_banner -filters 2>/dev/null | grep -qw ass \
+    || (echo "ERROR: ffmpeg is missing the 'ass' subtitle filter" && exit 1)
+
+ENV KARAOKE_OVERLAY_DIR=/app/overlays
+ENV KARAOKE_LOGO_PATH=/app/Logo-YellowDropShadow.png
+ENV KARAOKE_INTRO_PATH=/app/gkda-yellow.mp4
+ENV KARAOKE_FONT_PATH=/app/legacy/karaoke/fonts/SpaceMono-Regular.ttf
+ENV RENDER_WORK_DIR=/workspace/render_jobs
+ENV GDRIVE_CACHE_DIR=/workspace/gdrive_cache
 
 # Inject the build-time git SHA as late as possible so only this tiny layer
 # changes between code-only commits.
