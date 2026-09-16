@@ -8,6 +8,9 @@ audio-separator==0.47.0
 # (kuielab_a_vocals) need it at import time. 1.17.x supports CUDA 12 +
 # cuDNN 8, matching the nvidia/cuda:12.1.1-cudnn8-runtime base image.
 onnxruntime-gpu==1.17.1
+# audio-separator 0.47.0 imports audioread unconditionally but does not
+# depend on it (librosa 1.0 dropped the transitive dep).
+audioread==3.1.0
 scipy==1.14.0
 numpy==2.0.2
 soundfile==0.12.1

@@ -73,7 +73,10 @@ from audio_separator.separator import Separator
 models = [
     "kuielab_a_vocals.onnx",
     "MDX23C-8KFFT-InstVoc_HQ.ckpt",
-    "MelBandRoformerSYHFTV3Epsilon.ckpt",
+    # NOTE: MelBandRoformerSYHFTV3Epsilon.ckpt is intentionally not
+    # preloaded — audio-separator 0.47.0 + beartype 0.18.5 reject its
+    # Callable | None type hint at model instantiation. It still works
+    # via on-demand download at runtime if a fixed combo is pinned.
 ]
 for model_name in models:
     print(f"Preloading audio-separator model: {model_name}")
