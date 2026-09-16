@@ -38,8 +38,6 @@ __pycache__
 # Local media / caches / input data (can be very large)
 input
 input/
-overlays
-overlays/
 *.mov
 *.mp4
 *.avi
@@ -67,3 +65,12 @@ docs
 
 # Keep worker README if needed later
 !worker/README.md
+
+# Karaoke render assets baked into the worker image (Dockerfile COPY sources).
+# Note: files inside an excluded directory cannot be re-included, which is why
+# `overlays/` itself is not listed above.
+!gkda-yellow.mp4
+!Logo-YellowDropShadow.png
+!overlays/optical2_1080p30.mp4
+!overlays/optical_1080p30_crf23.mp4
+!legacy/karaoke/fonts/*.ttf
