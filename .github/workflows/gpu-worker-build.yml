@@ -17,6 +17,7 @@ on:
       - 'gkda-yellow.mp4'
       - 'Logo-YellowDropShadow.png'
       - '.github/workflows/gpu-worker-build.yml'
+      - '.dockerignore'
       - 'worker/Dockerfile'
       - 'worker/requirements.txt'
   release:
