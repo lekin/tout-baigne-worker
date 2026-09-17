@@ -389,6 +389,29 @@ def _nvenc_supports_p_presets() -> bool:
     return _NVENC_NEW_API_CACHE
 
 
+_NVENC_USABLE_CACHE: Optional[bool] = None
+
+
+def nvenc_usable() -> bool:
+    """Run a real 1s h264_nvenc encode once — the encoder can be listed while
+    the runtime still rejects sessions (e.g. RunPod serverless workers report
+    'unsupported device'). Result is cached per process."""
+    global _NVENC_USABLE_CACHE
+    if _NVENC_USABLE_CACHE is None:
+        try:
+            r = subprocess.run(
+                ['ffmpeg', '-hide_banner', '-f', 'lavfi', '-i',
+                 'testsrc2=s=320x240:d=1:r=24', '-c:v', 'h264_nvenc', '-f', 'null', '-'],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60,
+            )
+            _NVENC_USABLE_CACHE = r.returncode == 0
+        except Exception:
+            _NVENC_USABLE_CACHE = False
+        if not _NVENC_USABLE_CACHE:
+            print("h264_nvenc listed but encode test failed — falling back to libx264")
+    return _NVENC_USABLE_CACHE
+
+
 def _nvenc_args(fast: bool) -> List[str]:
     """Quality-oriented h264_nvenc args, old- or new-preset API."""
     if _nvenc_supports_p_presets():
@@ -426,9 +449,9 @@ def resolve_video_encoder(encoder: str = 'auto', fast: bool = False) -> Tuple[Li
     if enc == 'x264':
         return _x264_args(fast), [], 'libx264'
     if enc == 'nvenc':
-        if ffmpeg_has_encoder('h264_nvenc'):
+        if ffmpeg_has_encoder('h264_nvenc') and nvenc_usable():
             return _nvenc_args(fast), (['-r', '24'] if fast else []), 'h264_nvenc'
-        print("h264_nvenc not available, falling back to libx264")
+        print("h264_nvenc not usable, falling back to libx264")
         return _x264_args(fast), [], 'libx264'
     if enc == 'videotoolbox':
         if ffmpeg_has_encoder('h264_videotoolbox'):
@@ -440,10 +463,10 @@ def resolve_video_encoder(encoder: str = 'auto', fast: bool = False) -> Tuple[Li
     if fast:
         if is_darwin and ffmpeg_has_encoder('h264_videotoolbox'):
             return _videotoolbox_args(), ['-r', '24'], 'h264_videotoolbox'
-        if ffmpeg_has_encoder('h264_nvenc'):
+        if ffmpeg_has_encoder('h264_nvenc') and nvenc_usable():
             return _nvenc_args(fast), ['-r', '24'], 'h264_nvenc'
         return _x264_args(True), [], 'libx264'
-    if ffmpeg_has_encoder('h264_nvenc'):
+    if ffmpeg_has_encoder('h264_nvenc') and nvenc_usable():
         return _nvenc_args(False), [], 'h264_nvenc'
     return _x264_args(False), [], 'libx264'
 
