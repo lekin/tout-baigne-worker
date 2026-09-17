@@ -126,9 +126,20 @@ def _nvenc_probe() -> str:
         if r.returncode == 0:
             return "ok"
         tail = (r.stderr or "").strip().splitlines()
-        return "fail: " + (tail[-1] if tail else "unknown")
+        return "fail: " + " | ".join(tail[-4:])
     except Exception as e:
         return f"fail: {type(e).__name__}: {e}"
+
+
+def _nvidia_smi() -> str:
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return (r.stdout or r.stderr or "").strip()[:200]
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
 
 
 @app.get("/capabilities")
@@ -159,6 +170,8 @@ def capabilities() -> Dict[str, Any]:
             "libx264": "libx264" in encoders_out,
         },
         "nvenc_probe": _nvenc_probe(),
+        "nvidia_smi": _nvidia_smi(),
+        "driver_caps": os.environ.get("NVIDIA_DRIVER_CAPABILITIES", ""),
         "filters": {
             "ass": bool(_re.search(r"(?<![\w-])ass(?![\w-])", filters_out)),
             "subtitles": "subtitles" in filters_out,
