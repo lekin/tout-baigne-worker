@@ -1504,7 +1504,9 @@ class KaraokeGenerator:
         overlay_hue_deg: Optional[float] = None,
         overlay_saturation: Optional[float] = None,
         tint_color_hex: Optional[str] = None,
-        encoder: str = "auto"
+        encoder: str = "auto",
+        intro_path: Optional[str] = None,
+        intro_seconds: float = 4.0,
     ) -> bool:
         """
         Overlay subtitles and logo on video.
@@ -1701,6 +1703,29 @@ class KaraokeGenerator:
         # Duration handling: if max_duration_seconds is given, trim to it; else rely on -shortest
         duration_args = ["-t", f"{max_duration_seconds:.6f}"] if max_duration_seconds and max_duration_seconds > 0 else ["-shortest"]
 
+        # Fold the intro clip into this same encode pass instead of running a
+        # second full re-encode afterwards (visual-only overlay, audio is
+        # replaced later by the mux step anyway).
+        intro_idx = -1
+        intro_dur = 0.0
+        if intro_path and os.path.exists(intro_path):
+            from src.render.steps import get_media_duration_seconds
+            intro_len = get_media_duration_seconds(str(intro_path)) or 0.0
+            intro_dur = min(float(intro_len), float(intro_seconds)) if intro_len > 0 else 0.0
+            if intro_dur > 0:
+                intro_idx = 3 if has_effect else 2
+                scale_pad = (
+                    f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                    f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+                )
+                filter_complex += (
+                    f";[{intro_idx}:v]{scale_pad}[introV];"
+                    f"[finalv][introV]overlay=0:0:enable='between(t,0,{intro_dur:.6f})'[outv]"
+                )
+                print(f"🎞️  Intro overlay folded into render pass (visible 0–{intro_dur:.2f}s)")
+
+        map_label = "outv" if intro_idx >= 0 else "finalv"
+
         common_tail = [
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", audio_bitrate,
@@ -1710,6 +1735,7 @@ class KaraokeGenerator:
 
         loop_bg = bool(max_duration_seconds and max_duration_seconds > 0)
         video_input_args = ["-stream_loop", "-1", "-i", video_path] if loop_bg else ["-i", video_path]
+        intro_input_args = ["-i", intro_path] if intro_idx >= 0 else []
 
         if has_effect:
             command = [
@@ -1717,8 +1743,9 @@ class KaraokeGenerator:
                 *video_input_args,
                 "-stream_loop", "-1", "-i", effect_overlay_path,
                 "-i", logo_path,
+                *intro_input_args,
                 "-filter_complex", filter_complex,
-                "-map", "[finalv]",
+                "-map", f"[{map_label}]",
                 "-map", "0:a?",
             ] + fps_args + video_codec_args + duration_args + common_tail
         else:
@@ -1726,8 +1753,9 @@ class KaraokeGenerator:
                 "ffmpeg", "-y",
                 *video_input_args,
                 "-i", logo_path,
+                *intro_input_args,
                 "-filter_complex", filter_complex,
-                "-map", "[finalv]",
+                "-map", f"[{map_label}]",
                 "-map", "0:a?",
             ] + fps_args + video_codec_args + duration_args + common_tail
         
@@ -1743,7 +1771,7 @@ class KaraokeGenerator:
             print(f"Error running FFmpeg: {e}\n{tail}")
             return False
     
-    def generate_karaoke(self, video_path: str, srt_content: Optional[str] = None, output_path: str = None, logo_path: Optional[str] = None, fast_mode: bool = False, ass_file: Optional[str] = None, effect_overlay_paths: Optional[List[str]] = None, max_duration_seconds: Optional[float] = None, overlay_hue_deg: Optional[float] = None, overlay_saturation: Optional[float] = None, overlay_tint_color: Optional[str] = None, encoder: str = "auto") -> Tuple[bool, Optional[str]]:
+    def generate_karaoke(self, video_path: str, srt_content: Optional[str] = None, output_path: str = None, logo_path: Optional[str] = None, fast_mode: bool = False, ass_file: Optional[str] = None, effect_overlay_paths: Optional[List[str]] = None, max_duration_seconds: Optional[float] = None, overlay_hue_deg: Optional[float] = None, overlay_saturation: Optional[float] = None, overlay_tint_color: Optional[str] = None, encoder: str = "auto", intro_path: Optional[str] = None, intro_seconds: float = 4.0) -> Tuple[bool, Optional[str]]:
         """
         Generate a karaoke video from a video file and SRT content or ASS file.
         
@@ -1803,7 +1831,7 @@ class KaraokeGenerator:
 
             # Overlay subtitles, optional effect, and logo
             success = self.overlay_subtitles_and_logo(
-                video_path, ass_path, output_path, logo_path, fast_mode=fast_mode, effect_overlay_path=effect_path, max_duration_seconds=max_duration_seconds, overlay_hue_deg=overlay_hue_deg, overlay_saturation=overlay_saturation, tint_color_hex=overlay_tint_color, encoder=encoder
+                video_path, ass_path, output_path, logo_path, fast_mode=fast_mode, effect_overlay_path=effect_path, max_duration_seconds=max_duration_seconds, overlay_hue_deg=overlay_hue_deg, overlay_saturation=overlay_saturation, tint_color_hex=overlay_tint_color, encoder=encoder, intro_path=intro_path, intro_seconds=intro_seconds
             )
             if not success:
                 detail = getattr(self, '_last_ffmpeg_log', '') or ''

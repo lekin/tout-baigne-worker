@@ -21,7 +21,6 @@ from typing import Any, Dict, List, Optional
 
 from src.render.steps import (
     _looks_like_html,
-    apply_intro_overlay,
     download_asset,
     get_audio_duration,
     mux_replace_audio,
@@ -258,6 +257,7 @@ def run_karaoke_render(
             overlay_saturation=request.overlay_saturation,
             overlay_tint_color=request.bg_color,
             encoder=request.encoder,
+            intro_path=str(intro_path) if request.apply_intro and intro_path.exists() else None,
         )
         timings["render_s"] = round(time.monotonic() - t, 3)
         if not ok:
@@ -278,20 +278,8 @@ def run_karaoke_render(
         )
         timings["mux_s"] = round(time.monotonic() - t, 3)
 
-        # 6. Intro overlay
-        if request.apply_intro and intro_path.exists():
-            t = time.monotonic()
-            with_intro = job_dir / f"{final_path.stem}_intro.mp4"
-            try:
-                if apply_intro_overlay(
-                    str(final_path), str(with_intro), str(intro_path),
-                    request.video_width, request.video_height,
-                    fast=request.fast, encoder=request.encoder,
-                ):
-                    os.replace(str(with_intro), str(final_path))
-            except Exception as e:
-                logger.warning("Intro overlay failed, keeping pre-intro output: %s", e)
-            timings["intro_s"] = round(time.monotonic() - t, 3)
+        # 6. Intro overlay is folded into the render pass (single encode) —
+        # no second full re-encode needed here.
 
         result.success = True
         result.output_path = str(final_path)

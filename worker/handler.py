@@ -136,6 +136,7 @@ def capabilities() -> Dict[str, Any]:
         "status": "ok",
         "version": os.environ.get("WORKER_VERSION", "unknown"),
         "gpu": _gpu_name(),
+        "cpu_count": os.cpu_count(),
         "encoders": {
             "h264_nvenc": "h264_nvenc" in encoders_out,
             "h264_videotoolbox": "h264_videotoolbox" in encoders_out,
