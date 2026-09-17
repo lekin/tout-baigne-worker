@@ -5,9 +5,11 @@
 demucs==4.0.1
 audio-separator==0.47.0
 # audio-separator pulls onnxruntime only via extras; the ONNX models
-# (kuielab_a_vocals) need it at import time. 1.17.x supports CUDA 12 +
-# cuDNN 8, matching the nvidia/cuda:12.1.1-cudnn8-runtime base image.
-onnxruntime-gpu==1.17.1
+# (kuielab_a_vocals) need it at import time. Use the CPU build: GPU builds
+# <1.19 are compiled against numpy 1.x (breaks under our numpy>=2 pin), and
+# >=1.19 needs cuDNN 9 while the base image ships cuDNN 8. The ONNX models
+# are small so CPU inference is fine; demucs/torch still use CUDA.
+onnxruntime==1.28.0
 # audio-separator 0.47.0 imports audioread unconditionally but does not
 # depend on it (librosa 1.0 dropped the transitive dep).
 audioread==3.1.0
