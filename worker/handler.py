@@ -85,7 +85,14 @@ class QAInput(BaseModel):
 # Rendered files awaiting client download (file_token return mode).
 _RENDER_FILES: Dict[str, Tuple[str, float]] = {}
 _RENDER_FILES_LOCK = threading.Lock()
-_RENDER_FILE_TTL_S = 15 * 60
+_RENDER_FILE_TTL_S = 60 * 60
+
+# Async render jobs (file_token return mode). The RunPod Load Balancer cuts
+# requests after ~3min, so renders run in a background thread and the client
+# polls GET /render/{token} then downloads GET /files/{token}.
+_RENDER_JOBS: Dict[str, Dict[str, Any]] = {}
+_RENDER_JOBS_LOCK = threading.Lock()
+_RENDER_JOB_TTL_S = 60 * 60
 
 
 @app.get("/ping")
@@ -157,6 +164,50 @@ def _cleanup_path(path: Optional[str]) -> None:
         pass
 
 
+def _expire_render_jobs_locked() -> None:
+    """Drop expired job entries and their files. Caller holds _RENDER_JOBS_LOCK."""
+    now = time()
+    for tok, job in list(_RENDER_JOBS.items()):
+        if job.get("expires", 0) < now:
+            _RENDER_JOBS.pop(tok, None)
+            with _RENDER_FILES_LOCK:
+                entry = _RENDER_FILES.pop(tok, None)
+            if entry:
+                _cleanup_path(str(Path(entry[0]).parent))
+
+
+def _render_job_runner(token: str, render_request: KaraokeRenderRequest, gpu: str) -> None:
+    try:
+        result = run_karaoke_render(render_request, gpu_name=gpu)
+    except Exception as e:
+        logger.exception("Async render job %s unhandled exception", token)
+        result = KaraokeRenderResult(
+            success=False,
+            record_id=render_request.record_id,
+            error=f"{type(e).__name__}: {e}",
+            error_type="internal_error",
+            worker={"gpu": gpu},
+        )
+    logger.info(
+        "Async render job %s completed: success=%s encoder=%s size=%s error=%s",
+        token, result.success, result.encoder_used, result.size_bytes, result.error,
+    )
+    with _RENDER_JOBS_LOCK:
+        job = _RENDER_JOBS.get(token)
+        if job is None:
+            if result.output_path:
+                _cleanup_path(str(Path(result.output_path).parent))
+            return
+        job["status"] = "success" if result.success else "failed"
+        payload = asdict(result)
+        payload.pop("output_path", None)
+        job["result"] = payload
+        job["expires"] = time() + _RENDER_JOB_TTL_S
+    if result.success and result.output_path:
+        with _RENDER_FILES_LOCK:
+            _RENDER_FILES[token] = (result.output_path, time() + _RENDER_FILE_TTL_S)
+
+
 def _render_response_headers(result: KaraokeRenderResult) -> Dict[str, str]:
     import json as _json
 
@@ -199,6 +250,29 @@ async def render(req: QAInput, request: Request):
             )),
         )
 
+    if render_request.return_mode == "file_token":
+        # Async mode: the LB kills long requests, so run the render in a
+        # thread and let the client poll GET /render/{token}.
+        token = uuid.uuid4().hex
+        with _RENDER_JOBS_LOCK:
+            _expire_render_jobs_locked()
+            _RENDER_JOBS[token] = {
+                "status": "running",
+                "created": time(),
+                "expires": time() + _RENDER_JOB_TTL_S,
+                "result": None,
+            }
+        threading.Thread(
+            target=_render_job_runner,
+            args=(token, render_request, _gpu_name()),
+            daemon=True,
+        ).start()
+        return JSONResponse(content={
+            "status": "accepted",
+            "job_token": token,
+            "status_path": f"/render/{token}",
+        })
+
     try:
         result = run_karaoke_render(render_request, gpu_name=_gpu_name())
     except Exception as e:
@@ -223,22 +297,6 @@ async def render(req: QAInput, request: Request):
             headers=_render_response_headers(result),
         )
 
-    if render_request.return_mode == "file_token":
-        token = uuid.uuid4().hex
-        with _RENDER_FILES_LOCK:
-            # Expire stale entries and remove their files.
-            now = time()
-            for k, (stale_path, exp) in list(_RENDER_FILES.items()):
-                if exp < now:
-                    _RENDER_FILES.pop(k, None)
-                    _cleanup_path(str(Path(stale_path).parent))
-            _RENDER_FILES[token] = (result.output_path, now + _RENDER_FILE_TTL_S)
-        result.download_token = token
-        result.download_path = f"/files/{token}"
-        payload = asdict(result)
-        payload.pop("output_path", None)
-        return JSONResponse(content=payload, headers=_render_response_headers(result))
-
     # Default: stream the rendered MP4 back directly.
     job_dir = str(Path(result.output_path).parent)
     return FileResponse(
@@ -250,22 +308,38 @@ async def render(req: QAInput, request: Request):
     )
 
 
+@app.get("/render/{token}")
+def render_job_status(token: str):
+    with _RENDER_JOBS_LOCK:
+        _expire_render_jobs_locked()
+        job = _RENDER_JOBS.get(token)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown_or_expired_job")
+    if job["status"] == "running":
+        return JSONResponse(content={"status": "running"})
+    payload = dict(job.get("result") or {})
+    payload["status"] = job["status"]
+    if job["status"] == "success":
+        payload["download_path"] = f"/files/{token}"
+        payload["download_token"] = token
+    return JSONResponse(
+        content=payload,
+        status_code=200 if job["status"] == "success" else 500,
+    )
+
+
 @app.get("/files/{token}")
 def download_rendered_file(token: str):
     with _RENDER_FILES_LOCK:
-        entry = _RENDER_FILES.pop(token, None)
-    if not entry:
+        entry = _RENDER_FILES.get(token)
+    if not entry or entry[1] < time():
         raise HTTPException(status_code=404, detail="unknown_or_expired_token")
     path, _expiry = entry
     if not os.path.exists(path):
         raise HTTPException(status_code=410, detail="file_no_longer_available")
-    job_dir = str(Path(path).parent)
-    return FileResponse(
-        path,
-        media_type="video/mp4",
-        filename=Path(path).name,
-        background=BackgroundTask(_cleanup_path, job_dir),
-    )
+    # No cleanup here: the file must survive retries until the job expires
+    # (_expire_render_jobs_locked removes the job dir).
+    return FileResponse(path, media_type="video/mp4", filename=Path(path).name)
 
 
 def _safe_record_id(payload: Dict[str, Any]) -> str:
