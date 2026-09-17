@@ -1733,11 +1733,14 @@ class KaraokeGenerator:
         
         print("Running FFmpeg command...")
         try:
-            subprocess.run(command, check=True)
+            proc = subprocess.run(command, check=True, capture_output=True, text=True)
+            self._last_ffmpeg_log = proc.stderr or ""
             print(f"Karaoke video created at '{output_video_path}'.")
             return True
         except subprocess.CalledProcessError as e:
-            print(f"Error running FFmpeg: {e}")
+            tail = (e.stderr or "")[-4000:]
+            self._last_ffmpeg_log = tail
+            print(f"Error running FFmpeg: {e}\n{tail}")
             return False
     
     def generate_karaoke(self, video_path: str, srt_content: Optional[str] = None, output_path: str = None, logo_path: Optional[str] = None, fast_mode: bool = False, ass_file: Optional[str] = None, effect_overlay_paths: Optional[List[str]] = None, max_duration_seconds: Optional[float] = None, overlay_hue_deg: Optional[float] = None, overlay_saturation: Optional[float] = None, overlay_tint_color: Optional[str] = None, encoder: str = "auto") -> Tuple[bool, Optional[str]]:
@@ -1803,7 +1806,9 @@ class KaraokeGenerator:
                 video_path, ass_path, output_path, logo_path, fast_mode=fast_mode, effect_overlay_path=effect_path, max_duration_seconds=max_duration_seconds, overlay_hue_deg=overlay_hue_deg, overlay_saturation=overlay_saturation, tint_color_hex=overlay_tint_color, encoder=encoder
             )
             if not success:
-                return False, "Failed to overlay subtitles and logo"
+                detail = getattr(self, '_last_ffmpeg_log', '') or ''
+                tail = detail[-1500:] if detail else ''
+                return False, f"Failed to overlay subtitles and logo{': ' + tail if tail else ''}"
             
             return True, output_path
             
