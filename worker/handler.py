@@ -115,6 +115,22 @@ def _run_ffmpeg_info(flag: str) -> str:
         return ""
 
 
+def _nvenc_probe() -> str:
+    """Actually try a 1s nvenc encode — 'ok' or the stderr tail."""
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i",
+             "testsrc2=s=320x240:d=1:r=24", "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        if r.returncode == 0:
+            return "ok"
+        tail = (r.stderr or "").strip().splitlines()
+        return "fail: " + (tail[-1] if tail else "unknown")
+    except Exception as e:
+        return f"fail: {type(e).__name__}: {e}"
+
+
 @app.get("/capabilities")
 def capabilities() -> Dict[str, Any]:
     """Report render-relevant capabilities for post-deploy verification."""
@@ -142,6 +158,7 @@ def capabilities() -> Dict[str, Any]:
             "h264_videotoolbox": "h264_videotoolbox" in encoders_out,
             "libx264": "libx264" in encoders_out,
         },
+        "nvenc_probe": _nvenc_probe(),
         "filters": {
             "ass": bool(_re.search(r"(?<![\w-])ass(?![\w-])", filters_out)),
             "subtitles": "subtitles" in filters_out,
