@@ -1,0 +1,23 @@
+{
+  "source_file": "/Users/lekin/Code/tout-baigne/input/20260222064618.WAV",
+  "duration_seconds": 18000.064,
+  "total_segments": 400,
+  "recognized_segments": 1,
+  "tracks": [
+    {
+      "position": 1,
+      "timestamp": "01:30",
+      "first_seen_at": 90.0,
+      "last_seen_at": 102.0,
+      "artist": "Whitney Houston",
+      "title": "It's Not Right But It's Okay",
+      "album": "My Love Is Your Love",
+      "label": "Arista",
+      "year": "",
+      "isrc": "USAR19800138",
+      "shazam_id": "5175548",
+      "cover_url": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/4b/fb/0c/4bfb0cca-77b7-380c-a8aa-f59de0560b6b/078221903721.jpg/400x400cc.jpg",
+      "occurrences": 1
+    }
+  ]
+}

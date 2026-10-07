@@ -172,7 +172,9 @@ export function CellTooltip({
           >
             {content}
           </div>,
-          document.body
+          // Inside a fullscreen subtree only that element renders — portal into
+          // it, not document.body, or the tooltip stays invisible.
+          document.fullscreenElement ?? document.body
         )}
     </>
   );

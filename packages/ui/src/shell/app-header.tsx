@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { cn } from "../cn";
 
 // Shared TBP app header — same shell as Admin: bordered card header,
 // max-w-6xl container, brand link on the left, slots on the right.
@@ -9,6 +10,8 @@ export function AppHeader({
   email,
   children,
   leading,
+  edge,
+  sticky = false,
 }: {
   title: string;
   homeHref?: string;
@@ -17,9 +20,18 @@ export function AppHeader({
   leading?: ReactNode;
   /** Right-side slot: org switcher, theme toggle, logout, etc. */
   children?: ReactNode;
+  /** Pinned to the right edge of the window, outside the max-w container. */
+  edge?: ReactNode;
+  /** Pin the header to the top of the viewport while scrolling. */
+  sticky?: boolean;
 }) {
   return (
-    <header className="border-b bg-card">
+    <header
+      className={cn(
+        "border-b bg-card",
+        sticky && "sticky top-0 z-50"
+      )}
+    >
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <div className="flex items-center gap-4">
           {leading}
@@ -36,6 +48,11 @@ export function AppHeader({
           {children}
         </div>
       </div>
+      {edge && (
+        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+          {edge}
+        </div>
+      )}
     </header>
   );
 }

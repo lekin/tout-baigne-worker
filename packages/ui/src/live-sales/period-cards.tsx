@@ -3,10 +3,36 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { CellTooltip } from "../ui/cell-tooltip";
+import { RollingNumber } from "../ui/rolling-number";
 import type { SalesEvent } from "./types";
 
-function day(value: Date): string {
-  return value.toLocaleDateString("fr-FR", {
+const parisDayFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Paris",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** YYYY-MM-DD of the instant in Europe/Paris. */
+function parisDay(at: Date): string {
+  const parts = new Map(
+    parisDayFmt.formatToParts(at).map((p) => [p.type, p.value])
+  );
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+}
+
+function shiftDay(day: string, delta: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + delta, 12)).toISOString().slice(0, 10);
+}
+
+function mondayOf(day: string): string {
+  const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return shiftDay(day, -((dow + 6) % 7));
+}
+
+function day(value: string): string {
+  return new Date(`${value}T12:00:00Z`).toLocaleDateString("fr-FR", {
     day: "2-digit",
     month: "2-digit",
     timeZone: "UTC",
@@ -85,22 +111,16 @@ function periodTooltipContent(
 export function PeriodCards({
   events,
   eventHref = "/events/{id}",
-  footnote = "Ventes Shotgun enregistrées · journées UTC · tous types.",
+  footnote = "Ventes Shotgun enregistrées · journées heure de Paris · tous types.",
 }: {
   events: SalesEvent[];
   eventHref?: string;
   footnote?: string;
 }) {
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setUTCDate(today.getUTCDate() - 1);
-  const weekStart = new Date(today);
-  weekStart.setUTCDate(
-    today.getUTCDate() - ((today.getUTCDay() + 6) % 7)
-  );
-  const monthStart = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)
-  );
+  const today = parisDay(new Date());
+  const yesterday = shiftDay(today, -1);
+  const weekStart = mondayOf(today);
+  const monthStart = `${today.slice(0, 7)}-01`;
 
   const cards: {
     key: PeriodKey;
@@ -111,7 +131,7 @@ export function PeriodCards({
     {
       key: "today",
       label: "Aujourd’hui",
-      detail: `${day(today)} · depuis 00h UTC`,
+      detail: `${day(today)} · depuis 00h, heure de Paris`,
       empty: "Aucune vente aujourd’hui.",
     },
     {
@@ -151,7 +171,7 @@ export function PeriodCards({
               </CardHeader>
               <CardContent className="space-y-1">
                 <p className="text-3xl font-semibold tabular-nums">
-                  {total.toLocaleString("fr-FR")}
+                  <RollingNumber value={total} />
                 </p>
                 <p className="text-xs text-muted-foreground">billets Shotgun</p>
                 <p className="text-xs text-muted-foreground">{card.detail}</p>

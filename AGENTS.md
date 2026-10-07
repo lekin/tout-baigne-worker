@@ -1,5 +1,34 @@
 # Project notes
 
+## @platform/discovery (SEO + GEO for public sites)
+
+- Package lives in `~/Code/platform/packages/discovery` (separate `platform` repo, npm workspaces). Ships TS source, consumed via `"@platform/discovery": "file:../../platform/packages/discovery"` + `transpilePackages` in `www/next.config.ts` (with `turbopack.root` at `~/Code`).
+- Generic entities only — no TBP domains/brands/facts in the package. All TBP knowledge lives in `www/lib/discovery/` (`entities.ts` = pure adapter, `data.ts` = fetching). `TBP_ORGANIZATION` is declared once; relations flow site → brand → org → event.
+- `entity.id` is stable and URL-independent (caller `id` or name slug); JSON-LD `@id` is `${url}#${kind}` per render.
+- Event pages: `/events/<title>-<date>-<venue>-<postId>`; the trailing `rec…` post id resolves the page even if title/date/venue change (`eventPostId`). Past events keep their page (`mapPostToPublicEvent(record, {includePast:true})`, status `completed`); a post only resolves on a site that published it (`Website` field check).
+- Commands: `npm run discovery:audit` (tsx, loads `.env.local`, audits all 4 hosts live), `npx vitest run lib/discovery` (TBP answer-engine QA), `npm run typecheck` in `platform/packages/discovery` (package tests use fictional fixtures).
+- Facts shown in `EntityFacts` come from `geo.representation` — the same canonical data that feeds JSON-LD. `auditVisibleFacts` flags facts missing from rendered HTML.
+
+## @platform/notifications (operational alerts)
+
+- Package lives in `~/Code/platform/packages/notifications`. Operational escalation layer only (failures, stale data, SLA breaches, blockers, approvals) — never marketing/campaigns. Producers call `service.request({source, category, severity, recipient(s), title, message, actionUrl, deduplicationKey})` and nothing else.
+- Canonical tables (admin migration 041; generic DDL in package `migrations/`): `notifications` + `notification_recipients` (per-recipient `channel_plan`, `read_at`) + `notification_deliveries` (attempts/backoff) + `notification_dedup` (ledger, `occurrences` counts suppressed repeats). Dedup claim and delivery claim are atomic RPCs (`request_notification`, `claim_due_notification_deliveries` — SKIP LOCKED); the dedup window is anchored at first claim so a continuously failing process re-alerts on a bounded cadence.
+- Delivery pump = the admin scheduler (`Notifications dispatch` every 1m → `dispatchPending`); retries are `next_attempt_at` re-queues, not an internal loop. V1 channel: `in_app` (`InAppChannelAdapter`); new channels implement `NotificationChannelAdapter` and plug into `channel_plan` fallback.
+- TBP wiring in `admin/lib/notifications/`: `service.ts` (service-role repo + health/audit sinks), `recipients.ts` (`role:admin` → memberships of the `type='admin'` org — same rule as `is_tbp_admin()`), `queries.ts` (caller-uid-scoped reads). UI: `components/app/notifications-bell.tsx` in the nav, actions in `app/actions/notifications.ts`.
+- First vertical slice: `reportSyncFailure` in `admin/lib/scheduler.ts` escalates every scheduled-task failure (dedup key `scheduler-failure:<component>`, actionUrl `/platform`).
+- Lifecycle events are audit actions `notification.requested/.suppressed/.sent/.delivered/.failed/.read`; dispatch reports `tbp.notifications.dispatch` to component_health.
+- Commands: `npx vitest run` + `npm run typecheck` in the package; live smoke `npx tsx --env-file=.env.local --tsconfig tsconfig.json scripts/smoke-notifications.ts` (Node 22+).
+
+## @platform/artifacts (TBP Partner Packs)
+
+- Generic portable-artifact capability lives in `~/Code/platform/packages/artifacts` (model, section registry, renderer, publication/access). TBP Partner Packs are the first consumer — all TBP knowledge stays in `admin/lib/artifacts/`.
+- TBP wiring: `lib/artifacts/service.ts` (`artifactsService()` — service-role repo, health `tbp.artifacts.*`, audit `artifact.*`), `packs.ts` (the domain adapter: `PACK_TEMPLATES` + `buildPackDraft(event, templateId)` — the only place Event/Venue/Staff → sections mapping lives), `queries.ts` (per-event list via `context->>'eventId'`).
+- Tables `artifacts`/`artifact_versions`/`artifact_publications` (migration `072_artifacts.sql`, generic DDL in package `migrations/`). RLS: admin select only — public hosted access is service-role + hashed token; raw tokens are never stored (SHA-256), shown once at publish, `token_hint` identifies the live link.
+- Hosted view: `app/a/[token]/route.ts` → `service.renderPublicArtifact(token)` (no-store, noindex, 410 for revoked/expired, non-enumerating errors). `proxy.ts` matcher excludes `a/` — no auth.
+- Admin flow: event page → "Partner packs" (`/events/[id]/packs`) → `/packs/new?template=` → `PackEditor` (include/exclude sections, JSON payload overrides, live preview via the same `renderArtifactDocument`, expiry select, publish/rotate/revoke/duplicate/Download-HTML). Actions in `app/actions/artifacts.ts` — all `requireAdmin()`; the envelope (context, issuer) is re-derived server-side from canonical data.
+- Republish keeps the same URL (new version snapshot behind the active publication); `rotatePackLink` mints a fresh link and kills the old one. Templates: `tbp-dj-pack`, `tbp-venue-pack`, `tbp-production-pack`.
+- Commands: `npx vitest run lib/artifacts` (adapter tests), live smoke `npx tsx --env-file=.env.local --tsconfig tsconfig.json scripts/smoke-artifacts.ts` (Node 22+). Package: `npx vitest run` + `npm run typecheck` in `platform/packages/artifacts`.
+
 ## Phase A karaoke sync QA
 
 ### Useful commands
@@ -144,3 +173,53 @@ For records without a direct `Source Audio URL`, use `--audio-url` to pass a pub
 - 2026-09-01: `worker/handler.py` now returns `{"status":"ok","version":..., "gpu": ...}` on `/ping`; `scripts/check_runpod_worker.py` performs authenticated, bounded readiness probes.
 - 2026-09-01: CI/GitHub-Actions/RunPod loop complete: workflow pushed, multiple native `linux/amd64` builds published to GHCR, deployed, version-verified, smoke QA passed, rollback verified, scale-to-zero confirmed.
 - 2026-09-01: Dockerfile cache fixed — `ARG WORKER_VERSION` moved to final layer and Demucs model preload moved before `COPY src/worker`, giving sub-3-minute code-only CI builds.
+
+## Remote karaoke render (definitive renders on RunPod)
+
+`generate --remote` renders the definitive karaoke MP4 on a RunPod worker and downloads it locally — **no Airtable upload, no Airtable credentials sent to the worker**. Sync previews stay local.
+
+### Endpoints
+
+- **CPU render (recommended)**: `5mdcsyq1hm8ryx` — Serverless CPU `cpu3c` compute-optimized, 16 vCPU / 32 GB, LOAD_BALANCER, same worker image. libx264 with 16 cores beats the GPU worker's weak CPU.
+- **GPU (audio QA + optional render)**: `ylkhb72ej3hijz` — RTX 4090, `ADA_24`. NVENC does **not** work on RunPod serverless (`OpenEncodeSessionEx: unsupported device` even with `NVIDIA_DRIVER_CAPABILITIES=all` + `video` in driver_caps — platform limitation). `encoder=auto` falls back to libx264, but the GPU worker's CPU is ~6× slower than cpu3c on this pipeline.
+
+### Usage
+
+```bash
+export RUNPOD_API_KEY=...   # ~/.runpod/config.toml
+python -m src.cli generate --record-id <id> --remote \
+  --remote-endpoint 5mdcsyq1hm8ryx --encoder x264 \
+  --overlay overlays/optical2_1080p30.mp4 --no-upload --output out.mp4
+```
+
+- `--remote` → `_generate_remote` in `src/cli.py`; payload = record id, track name, ASS/SRT, audio/video/GDrive/YouTube URLs, offsets, encoder, overlay name (resolved in-image), dimensions. Nothing secret.
+- `--encoder auto|nvenc|x264|videotoolbox` (auto = nvenc if usable else x264; videotoolbox = local macOS fast mode).
+- `--no-upload` also skips Airtable upload + WhatsApp for local renders.
+
+### Async flow (required)
+
+The LB drops HTTP requests after ~3 min and renders take 1–15 min, so `POST /render` with `return_mode=file_token` returns a `job_token` immediately; the render runs in a thread. Client polls `GET /render/{token}` (HTTP 500 carries the failed payload — read it) then downloads `GET /files/{token}` (files live 60 min). Worker-side timings are in the result JSON (`timings` dict, `encoder_used`, `sha256`).
+
+### Performance (record rec1XbI4BcQmkxnhy, 124s 1080p, overlay optical2)
+
+| Target | Wall | Worker render | Encoder |
+| --- | --- | --- | --- |
+| Local M3 (old two-pass) | 13m07s | — | libx264 |
+| Local M3 (single-pass) | 6m40s | — | libx264 |
+| **Remote cpu3c 16 vCPU** | **81s** | 60s | libx264 |
+| Remote GPU RTX 4090 | fail | nvenc blocked | — |
+
+Remote-vs-local SSIM: 0.979 (same ASS/fonts/overlay → visually identical).
+
+### Gotchas discovered
+
+- The render pipeline is **CPU-bound** (libass + overlay blend + eq); the GPU only accelerates the encoder. Cost: cpu3c ≈ $0.036/vCPU/h → ~$0.013 per 124s render.
+- Intro is folded into the render `filter_complex` (`overlay=enable='between(t,0,4)'`) — a second full re-encode pass was eliminated (~2× faster). `apply_intro_overlay` remains in `src/render/steps.py` but is no longer used.
+- ASS `Fontname` historically held a `.ttf` path that libass can't resolve (silent fallback). `normalize_ass_font_path` rewrites it to the family name + `fontsdir=` points at the font dir; the image bakes all SpaceMono variants.
+- `.dockerignore` must not exclude `overlays/`, `*.mp4`, `*.png`, `*.ttf` — the assets are `git add -f`'d and copied into the image.
+- `audio-separator` needs `numpy>=2` + `audioread` + CPU `onnxruntime==1.23.2` (last with py3.10 wheels; onnxruntime-gpu is incompatible with numpy 2 on the cuDNN8 base).
+- `/capabilities` reports encoders, `nvenc_probe` (real 1s encode test), fonts, overlays, `cpu_count`.
+
+### Remote compute kill switch (@platform/compute policy)
+
+`COMPUTE_REMOTE_ENABLED=false` (or `0|off|no|disabled`) refuses `--remote` before any RunPod request — same contract as the platform package. `@platform/compute` (`~/Code/platform/packages/compute`) owns the generic policy: execution modes `local|remote|auto`, per-workload defaults (`media.ffmpeg.render`→remote, `music.track.analyze`→local, `video.analyze`→auto), env pins `COMPUTE_DEFAULT_MODE`, `COMPUTE_MODE_<TYPE>`, `COMPUTE_PROVIDER_<TYPE>`, `COMPUTE_MAX_COST_USD`, runtime `ComputeRuntimeConfig` toggle, and a persisted `routing` record on every execution (requestedMode/resolvedMode/provider/reason) so RunPod usage is auditable. DJOS exposes a minimal control surface at `GET|POST /api/compute` (Bearer auth): remoteEnabled toggle, defaultMode, per-workload mode, usage (running count, compute ms, estimated spend).

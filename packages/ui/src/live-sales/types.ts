@@ -3,6 +3,7 @@
 // renders "—". Admin and Backstage use the exact same table component.
 
 import type { Asset } from "../assets/types";
+import type { SalesTrend } from "./trend";
 
 export interface TrendComparison {
   method: "same_period" | "latest";
@@ -52,9 +53,12 @@ export interface SalesEvent {
   percentage?: number;
   // Trend tooltip
   days_until?: number | null;
-  trend_status?: "ahead" | "on_track" | "behind";
+  trend_status?: SalesTrend;
   trend_total?: number;
   trend_days_before?: number;
+  // Whole hours before the event start the comparison is taken at (0 = at
+  // doors). Preferred over trend_days_before when present.
+  trend_hours_before?: number | null;
   trend_benchmark_method?: "same_period" | "latest";
   trend_comparisons?: TrendComparison[];
   // Conjoncture tooltip

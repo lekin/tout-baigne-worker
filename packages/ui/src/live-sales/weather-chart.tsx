@@ -14,8 +14,10 @@ import {
 import type { WeatherHour } from "./types";
 
 export function WeatherChart({ hours }: { hours: WeatherHour[] }) {
+  // h.time is a naive "YYYY-MM-DDTHH:mm" string already in Europe/Paris —
+  // slice it rather than parsing in the browser's timezone.
   const data = hours.map((h) => ({
-    time: `${new Date(h.time).getHours()}h`,
+    time: `${/^\d{4}-\d{2}-\d{2}T(\d{2})/.exec(h.time)?.[1] ?? "?"}h`,
     temperature: Math.round(h.temperature * 10) / 10,
     precipitation: h.precipitation,
   }));

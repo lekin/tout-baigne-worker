@@ -22,6 +22,13 @@ import {
   TableRow,
 } from "../ui/table";
 import type { SalesEvent, TrendComparison } from "./types";
+import {
+  classifySalesTrend,
+  formatComparisonOffset,
+  SALES_BENCHMARK_LABELS,
+  SALES_TREND_COLORS,
+  SALES_TREND_LABELS,
+} from "./trend";
 import { WeatherChart } from "./weather-chart";
 
 export type SortableColumn =
@@ -91,36 +98,10 @@ function salesStatusVariant(status?: string) {
   return "outline" as const;
 }
 
-// Mirrors Admin's lib/daily-sales/benchmark.ts classifyRatio.
-function classifyRatio(
-  primaryTotal: number,
-  benchmarkTotal: number
-): "ahead" | "on_track" | "behind" {
-  if (benchmarkTotal === 0) {
-    return primaryTotal > 0 ? "ahead" : "on_track";
-  }
-  const ratio = primaryTotal / benchmarkTotal;
-  if (ratio >= 1.2) return "ahead";
-  if (ratio <= 0.8) return "behind";
-  return "on_track";
-}
+// Trend classification, labels and colors are centralized in ./trend
+// (shared with Admin via @tbp/ui).
 
-const TREND_LABELS: Record<string, string> = {
-  ahead: "En avance",
-  on_track: "On track",
-  behind: "En retard",
-};
-
-const TREND_COLORS: Record<string, string> = {
-  ahead: "#34d399",
-  on_track: "#38bdf8",
-  behind: "#f87171",
-};
-
-const BENCHMARK_LABELS: Record<string, string> = {
-  same_period: "même période",
-  latest: "derniers events",
-};
+const BENCHMARK_LABELS = SALES_BENCHMARK_LABELS;
 
 const CONJONCTURE_STYLES: Record<
   string,
@@ -234,23 +215,25 @@ function TrendCell({ event }: { event: SalesEvent }) {
             <span
               className="rounded px-1.5 py-0.5 font-medium"
               style={{
-                backgroundColor: TREND_COLORS[event.trend_status],
+                backgroundColor: SALES_TREND_COLORS[event.trend_status],
                 color: "#0f172a",
               }}
             >
-              {TREND_LABELS[event.trend_status]}
+              {SALES_TREND_LABELS[event.trend_status]}
             </span>
             <span className="font-medium">
               {event.trend_total} vendus
             </span>
             <span className="text-muted-foreground">
-              à J-{event.trend_days_before}
+              {event.trend_hours_before != null
+                ? formatComparisonOffset(event.trend_hours_before)
+                : `à J-${event.trend_days_before}`}
             </span>
           </div>
           {comparisons.length > 0 && (
             <div className="mt-2 border-t border-foreground/10">
               {comparisons.map((c) => {
-                const methodStatus = classifyRatio(
+                const methodStatus = classifySalesTrend(
                   event.trend_total ?? 0,
                   c.total
                 );
@@ -268,11 +251,11 @@ function TrendCell({ event }: { event: SalesEvent }) {
                       <span
                         className="rounded px-1 py-px font-medium"
                         style={{
-                          backgroundColor: TREND_COLORS[methodStatus],
+                          backgroundColor: SALES_TREND_COLORS[methodStatus],
                           color: "#0f172a",
                         }}
                       >
-                        {TREND_LABELS[methodStatus]}
+                        {SALES_TREND_LABELS[methodStatus]}
                       </span>
                     </div>
                     <div className="text-muted-foreground">
@@ -307,11 +290,11 @@ function TrendCell({ event }: { event: SalesEvent }) {
         <Badge
           className="w-fit"
           style={{
-            backgroundColor: TREND_COLORS[event.trend_status],
+            backgroundColor: SALES_TREND_COLORS[event.trend_status],
             color: "#0f172a",
           }}
         >
-          {TREND_LABELS[event.trend_status]}
+          {SALES_TREND_LABELS[event.trend_status]}
         </Badge>
       </div>
     </CellTooltip>
@@ -357,9 +340,23 @@ function WeatherCell({ event }: { event: SalesEvent }) {
       content={
         <div className="space-y-3 whitespace-normal py-1">
           <div>
-            <p className="font-semibold text-sm">
-              Météo à l’ouverture · {event.weather_opening_time ?? "—"}
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold text-sm">
+                Météo à l’ouverture · {event.weather_opening_time ?? "—"}
+              </p>
+              {event.weather_sky_emoji && (
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span
+                    role="img"
+                    aria-label={event.weather_sky_label}
+                    className="text-base leading-none"
+                  >
+                    {event.weather_sky_emoji}
+                  </span>
+                  {event.weather_sky_label}
+                </span>
+              )}
+            </div>
             {event.weather_opening_is_fallback && (
               <p className="mt-1 text-muted-foreground">
                 Horaire d’ouverture non renseigné : heure de début utilisée.
@@ -381,18 +378,6 @@ function WeatherCell({ event }: { event: SalesEvent }) {
                   })} mm`}
             </span>
           </div>
-          {event.weather_sky_emoji && (
-            <div className="flex items-center gap-2 text-sm">
-              <span
-                role="img"
-                aria-label={event.weather_sky_label}
-                className="text-base leading-none"
-              >
-                {event.weather_sky_emoji}
-              </span>
-              <span>{event.weather_sky_label}</span>
-            </div>
-          )}
           <div className="flex items-center gap-2 text-sm tabular-nums">
             <Wind className="h-3.5 w-3.5 text-muted-foreground" />
             <span>
@@ -964,7 +949,7 @@ export function SalesTable({
                     <TableCell className="font-medium">
                       {event.days_until !== undefined &&
                       event.days_until !== null
-                        ? `D${event.days_until > 0 ? "-" : "+"}${Math.abs(event.days_until)}`
+                        ? `D${event.days_until >= 0 ? "-" : "+"}${Math.abs(event.days_until)}`
                         : "—"}
                     </TableCell>
                     <TableCell>
