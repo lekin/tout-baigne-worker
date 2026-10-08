@@ -10,6 +10,7 @@ export interface PartnerRoom {
   event_type?: string | null
   technical_title?: string | null
   technical_notes?: string | null
+  is_broadcast?: boolean | null
   staff?: PartnerStaffItem[] | null
 }
 
@@ -124,6 +125,11 @@ function RoomPartnerSection({ room }: { room: PartnerRoom }) {
             {room.event_type}
           </span>
         )}
+        {room.is_broadcast && (
+          <span className="text-xs font-medium text-muted-foreground">
+            Rediff son central
+          </span>
+        )}
         {room.technical_title && !room.technical_notes && (
           <span className="text-xs font-medium text-muted-foreground">
             {room.technical_title}
@@ -154,8 +160,14 @@ function RoomPartnerSection({ room }: { room: PartnerRoom }) {
   )
 }
 
+function centralFirst(a: PartnerRoom, b: PartnerRoom): number {
+  const ac = a.name.trim().toLowerCase() === "central" ? 0 : 1
+  const bc = b.name.trim().toLowerCase() === "central" ? 0 : 1
+  return ac - bc
+}
+
 export function PartnerInfoCard({ info }: { info: PartnerInfo }) {
-  const rooms = info.rooms ?? []
+  const rooms = [...(info.rooms ?? [])].sort(centralFirst)
   const hasRoomInfo = rooms.some(
     (r) => r.technical_notes || r.technical_title || (r.staff && r.staff.length > 0)
   )
