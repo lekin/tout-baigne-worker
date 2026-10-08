@@ -33,3 +33,5 @@ export * from "./live-sales/sales-table";
 export * from "./assets/types";
 export * from "./assets/asset-gallery";
 export * from "./assets/visual-assets-section";
+
+export * from "./partner/partner-info-card";
