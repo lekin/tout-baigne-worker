@@ -10,6 +10,7 @@ on:
       - 'worker/**'
       - 'src/qa/**'
       - 'src/render/**'
+      - 'src/video/**'
       - 'src/karaoke_generator.py'
       - 'src/config.py'
       - 'overlays/**'

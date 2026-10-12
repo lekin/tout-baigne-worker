@@ -33,6 +33,8 @@ from src.render.executor import (
     KaraokeRenderResult,
     run_karaoke_render,
 )
+from src.render.steps import download_asset
+from src.video.highlights import analyze_highlights
 
 logging.basicConfig(
     level=logging.INFO,
@@ -442,6 +444,69 @@ async def run(req: QAInput, request: Request) -> Dict[str, Any]:
         result.error_type,
     )
     return asdict(result)
+
+
+_ANALYZE_MAX_DURATION_S = 30 * 60
+
+
+@app.post("/analyze-video")
+async def analyze_video(req: QAInput, request: Request) -> Dict[str, Any]:
+    """Highlight/segment analysis for a captation video.
+
+    input: {video_url, target_seconds?, max_segments?}
+    Downloads to a temp file, runs ffmpeg-based scoring, returns ranked
+    candidate segments for reel extraction. Sync — the LB ~3min window is
+    ample for typical captation clips; long videos are rejected up front.
+    """
+    job_id = request.headers.get("x-runpod-job-id") or f"analyze-{int(time() * 1000)}"
+    logger.info("Analyze job %s received: %s", job_id, _redact_input(req.input))
+
+    video_url = str(req.input.get("video_url") or "")
+    if not video_url:
+        return {"success": False, "error": "missing video_url",
+                "error_type": "input_error", "worker": {"gpu": _gpu_name()}}
+    try:
+        target_seconds = float(req.input.get("target_seconds") or 20.0)
+        max_segments = int(req.input.get("max_segments") or 8)
+        target_seconds = max(3.0, min(180.0, target_seconds))
+        max_segments = max(1, min(50, max_segments))
+    except (TypeError, ValueError) as e:
+        return {"success": False, "error": f"invalid params: {e}",
+                "error_type": "input_error", "worker": {"gpu": _gpu_name()}}
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".mp4", delete=False, dir=tempfile.gettempdir()
+        ) as tmp:
+            tmp_path = tmp.name
+        if not download_asset(video_url, tmp_path, timeout_seconds=300):
+            return {"success": False, "error": "video download failed",
+                    "error_type": "download_error", "worker": {"gpu": _gpu_name()}}
+
+        result = analyze_highlights(
+            tmp_path,
+            target_seconds=target_seconds,
+            max_segments=max_segments,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("Analyze job %s timed out", job_id)
+        return {"success": False, "error": "analysis timed out",
+                "error_type": "internal_error", "worker": {"gpu": _gpu_name()}}
+    except Exception as e:
+        logger.exception("Analyze job %s unhandled exception", job_id)
+        return {"success": False, "error": f"{type(e).__name__}: {e}",
+                "error_type": "internal_error", "worker": {"gpu": _gpu_name()}}
+    finally:
+        _cleanup_path(tmp_path)
+
+    if result.get("duration", 0) > _ANALYZE_MAX_DURATION_S:
+        return {"success": False, "error": "video exceeds 30min limit",
+                "error_type": "input_error", "worker": {"gpu": _gpu_name()}}
+
+    logger.info("Analyze job %s completed: %d segments", job_id,
+                len(result.get("segments", [])))
+    return {"success": True, "worker": {"gpu": _gpu_name()}, **result}
 
 
 if __name__ == "__main__":
