@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
 from contextlib import asynccontextmanager
