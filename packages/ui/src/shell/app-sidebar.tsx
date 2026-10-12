@@ -35,6 +35,10 @@ export interface SidebarNavSection {
 interface SidebarContextValue {
   collapsed: boolean;
   toggleCollapsed: () => void;
+  /** Transient collapse state driven by the page (e.g. a media tab that
+   *  wants the rail out of the way). Never persisted — takes precedence
+   *  over both the explicit toggle and the per-route default while set. */
+  setCollapsedOverride: (collapsed: boolean | null) => void;
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
 }
@@ -79,13 +83,15 @@ export function SidebarProvider({
 }) {
   const pathname = usePathname();
   const [explicit, setExplicit] = useState<boolean | null>(initialCollapsed);
+  const [override, setOverride] = useState<boolean | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const collapsed =
-    explicit ?? isCollapsedByDefault(pathname, defaultCollapsedPaths);
+    override ?? explicit ?? isCollapsedByDefault(pathname, defaultCollapsedPaths);
 
   const toggleCollapsed = useCallback(() => {
     const next = !collapsed;
+    setOverride(null);
     setExplicit(next);
     if (cookieName) {
       document.cookie = `${cookieName}=${next ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
@@ -104,7 +110,13 @@ export function SidebarProvider({
   }, [toggleCollapsed]);
 
   const value = useMemo(
-    () => ({ collapsed, toggleCollapsed, mobileOpen, setMobileOpen }),
+    () => ({
+      collapsed,
+      toggleCollapsed,
+      setCollapsedOverride: setOverride,
+      mobileOpen,
+      setMobileOpen,
+    }),
     [collapsed, toggleCollapsed, mobileOpen]
   );
 
