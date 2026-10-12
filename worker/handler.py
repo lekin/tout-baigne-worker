@@ -35,6 +35,7 @@ from src.render.executor import (
 )
 from src.render.steps import download_asset
 from src.video.highlights import analyze_highlights
+from src.video.keywords import extract_keywords
 
 logging.basicConfig(
     level=logging.INFO,
@@ -470,6 +471,9 @@ async def analyze_video(req: QAInput, request: Request) -> Dict[str, Any]:
         max_segments = int(req.input.get("max_segments") or 8)
         target_seconds = max(3.0, min(180.0, target_seconds))
         max_segments = max(1, min(50, max_segments))
+        include_keywords = bool(req.input.get("include_keywords", True))
+        keyword_frames = max(4, min(20, int(req.input.get("keyword_frames") or 10)))
+        keyword_top_k = max(1, min(20, int(req.input.get("keyword_top_k") or 8)))
     except (TypeError, ValueError) as e:
         return {"success": False, "error": f"invalid params: {e}",
                 "error_type": "input_error", "worker": {"gpu": _gpu_name()}}
@@ -489,6 +493,19 @@ async def analyze_video(req: QAInput, request: Request) -> Dict[str, Any]:
             target_seconds=target_seconds,
             max_segments=max_segments,
         )
+        if include_keywords:
+            # Keywords are best-effort — a model/cache failure must not
+            # cost the caller the segment analysis.
+            try:
+                result["keywords"] = extract_keywords(
+                    tmp_path,
+                    duration=result["duration"],
+                    n_frames=keyword_frames,
+                    top_k=keyword_top_k,
+                ).get("keywords", [])
+            except Exception:
+                logger.exception("Analyze job %s keyword extraction failed", job_id)
+                result["keywords"] = []
     except subprocess.TimeoutExpired:
         logger.warning("Analyze job %s timed out", job_id)
         return {"success": False, "error": "analysis timed out",

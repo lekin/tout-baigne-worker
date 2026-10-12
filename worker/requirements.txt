@@ -17,6 +17,14 @@ scipy==1.14.0
 numpy==2.0.2
 soundfile==0.12.1
 
+# CLIP zero-shot video tagging for /analyze-video (ViT-B/32, ~350MB
+# weights downloaded once to the hub cache at first use). torchvision is
+# pinned to the build matching the image's torch 2.5.1 so pip does not
+# upgrade torch itself.
+torchvision==0.20.1
+open_clip_torch==3.3.0
+pillow==10.4.0
+
 # HTTP / parsing
 requests==2.32.3
 pydantic==2.8.2
