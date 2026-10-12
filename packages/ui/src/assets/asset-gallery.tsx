@@ -159,30 +159,47 @@ export function AssetGallery({
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       authCookieName ? { cookieOptions: { name: authCookieName } } : undefined
     );
-    const channel = supabase
-      .channel(`${realtime.table}_${eventId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: realtime.table,
-          filter: `${realtime.filterColumn ?? "event_id"}=eq.${eventId}`,
-        },
-        () => {
-          router.refresh();
-        }
-      )
-      .subscribe();
+    let joined = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      // Unique topic per effect run — realtime-js dedupes channel() by topic
+      // and removeChannel() is async, so reusing a topic on remount (tab
+      // switches, StrictMode) returns the still-subscribed channel and .on()
+      // throws "cannot add postgres_changes callbacks after subscribe()".
+      channel = supabase
+        .channel(
+          `${realtime.table}_${eventId}_${crypto.randomUUID()}`
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: realtime.table,
+            filter: `${realtime.filterColumn ?? "event_id"}=eq.${eventId}`,
+          },
+          () => {
+            router.refresh();
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") joined = true;
+        });
+    } catch {
+      // Never let a channel race surface as a render error — polling covers us.
+    }
 
-    // Fallback polling while realtime connects or for webhook-only environments.
+    // Fallback polling ONLY while realtime never joins (e.g. publication off).
+    // A blind router.refresh() every few seconds re-fetches the whole page,
+    // re-signs media URLs and aborts in-flight streams — that's what used to
+    // interrupt playback and surface "destination stream closed early".
     const interval = setInterval(() => {
-      router.refresh();
-    }, 10000);
+      if (!joined) router.refresh();
+    }, 15000);
     const stop = setTimeout(() => clearInterval(interval), 5 * 60 * 1000);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
       clearInterval(interval);
       clearTimeout(stop);
     };
