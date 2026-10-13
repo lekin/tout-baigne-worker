@@ -10,13 +10,20 @@ required.
 
 Usage:
   whisper_lyrics_sync.py <audio.wav> <spec.json|->  →  prints JSON
-    {"lines": [{"start": s, "end": e, "text": "..."}], "report": {...}}
+    {"lines": [{"start": s, "end": e, "text": "..."}], "mode": ..., "report": {...}}
 
 Spec:
   {"lyrics": "line one\nline two\n...",           // raw lyric text
    "lines": [{"text": "..."}],                     // or pre-split lines
+   "mode": "auto",                                 // aligned|transcript|auto
    "model": "small",                               // whisper model (env WHISPER_MODEL)
    "language": null}
+
+Modes:
+  transcript — whisper's own words, grouped per segment (no alignment).
+  aligned    — known lyrics snapped onto whisper words; empty if nothing
+               matches.
+  auto       — aligned first, transcript when alignment finds nothing.
 """
 import json
 import os
@@ -56,6 +63,36 @@ def _transcribe_words(audio_path: str, model_name: str, language):
     return [w for w in words if w["word"]]
 
 
+def _transcribe_segments(audio_path: str, model_name: str, language):
+    """Whisper segments → transcript lines (one ASS line per segment)."""
+    import contextlib
+
+    import whisper
+
+    model = whisper.load_model(model_name)
+    with contextlib.redirect_stdout(sys.stderr):
+        result = model.transcribe(
+            audio_path,
+            word_timestamps=False,
+            language=language or None,
+            verbose=False,
+            condition_on_previous_text=False,
+        )
+    lines = []
+    for seg in result.get("segments", []):
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        lines.append(
+            {
+                "start": float(seg.get("start", 0.0)),
+                "end": float(seg.get("end", 0.0)),
+                "text": text,
+            }
+        )
+    return lines
+
+
 def main() -> int:
     if len(sys.argv) < 3:
         print("usage: whisper_lyrics_sync.py <audio> <spec.json|->", file=sys.stderr)
@@ -74,47 +111,74 @@ def main() -> int:
     lyrics_text = spec.get("lyrics") or "\n".join(
         l.get("text", "") for l in spec.get("lines", [])
     )
-    if not lyrics_text.strip():
+    mode = spec.get("mode", "auto")
+    if mode not in ("aligned", "transcript", "auto"):
+        print(f"spec: unknown mode {mode!r}", file=sys.stderr)
+        return 2
+    if mode != "transcript" and not lyrics_text.strip():
         print("spec: no lyrics text", file=sys.stderr)
         return 1
 
     model_name = spec.get("model") or os.environ.get("WHISPER_MODEL", "small")
-    words = _transcribe_words(audio_path, model_name, spec.get("language"))
-    if not words:
-        print(json.dumps({"lines": [], "report": {"reason": "no words heard"}}))
+
+    def transcript_lines():
+        return _transcribe_segments(audio_path, model_name, spec.get("language"))
+
+    if mode == "transcript":
+        print(json.dumps({"lines": transcript_lines(), "mode": "transcript"}))
         return 0
 
-    from src.advanced_lyrics_aligner import AdvancedLyricsAligner
+    words = _transcribe_words(audio_path, model_name, spec.get("language"))
+    lines, report = [], {}
+    if words:
+        from src.advanced_lyrics_aligner import AdvancedLyricsAligner
 
-    # The aligner chatters to stdout (section detection, skips, merges) —
-    # stdout is reserved for the JSON result, so logs go to stderr.
-    import contextlib
+        # The aligner chatters to stdout (section detection, skips, merges) —
+        # stdout is reserved for the JSON result, so logs go to stderr.
+        import contextlib
 
-    aligner = AdvancedLyricsAligner()
-    with contextlib.redirect_stdout(sys.stderr):
-        srt_content, report = aligner.align_lyrics_to_whisper(
-            lyrics_text, words
+        aligner = AdvancedLyricsAligner()
+        with contextlib.redirect_stdout(sys.stderr):
+            srt_content, report = aligner.align_lyrics_to_whisper(
+                lyrics_text, words
+            )
+
+        # SRT → line dicts (kept simple — the aligner owns the formatting).
+        import re
+
+        for block in re.split(r"\n\s*\n", srt_content.strip()):
+            rows = block.strip().split("\n")
+            if len(rows) < 3 or " --> " not in rows[1]:
+                continue
+            a, b = rows[1].split(" --> ")
+
+            def ts(v: str) -> float:
+                h, m, rest = v.replace(",", ".").split(":")
+                return int(h) * 3600 + int(m) * 60 + float(rest)
+
+            lines.append(
+                {"start": ts(a), "end": ts(b), "text": " ".join(rows[2:]).strip()}
+            )
+
+    if not lines and mode == "auto":
+        # Nothing alignable — fall back to whisper's own transcript so the
+        # reel still gets synced text.
+        print(
+            "alignment produced no lines — falling back to transcript",
+            file=sys.stderr,
         )
-
-    # SRT → line dicts (kept simple — the aligner owns the formatting).
-    import re
-
-    lines = []
-    for block in re.split(r"\n\s*\n", srt_content.strip()):
-        rows = block.strip().split("\n")
-        if len(rows) < 3 or " --> " not in rows[1]:
-            continue
-        a, b = rows[1].split(" --> ")
-
-        def ts(v: str) -> float:
-            h, m, rest = v.replace(",", ".").split(":")
-            return int(h) * 3600 + int(m) * 60 + float(rest)
-
-        lines.append(
-            {"start": ts(a), "end": ts(b), "text": " ".join(rows[2:]).strip()}
+        print(
+            json.dumps(
+                {
+                    "lines": transcript_lines(),
+                    "mode": "transcript",
+                    "report": {"fallback": "alignment empty"},
+                }
+            )
         )
+        return 0
 
-    print(json.dumps({"lines": lines, "report": report}))
+    print(json.dumps({"lines": lines, "mode": "aligned", "report": report}))
     return 0
 
 
