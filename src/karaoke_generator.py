@@ -1383,12 +1383,10 @@ class KaraokeGenerator:
         """
         print(f"Converting SRT to ASS karaoke format...")
 
-        karaoke_tag = "\\kf" if progressive_fill else "\\k"
-        
         lines = srt_content.strip().split('\n')
         segments = []
         i = 0
-        
+
         while i < len(lines):
             line = lines[i].strip()
             if line.isdigit():
@@ -1412,85 +1410,32 @@ class KaraokeGenerator:
                 segments.append((idx, start, end, text))
             else:
                 i += 1
-        
-        center_x = self.video_width // 2
-        pos_y_top = int(self.video_height * 0.33)
-        pos_y_bottom = int(self.video_height * 0.72)
-        
-        with open(ass_path, 'w', encoding='utf-8') as f:
-            f.write("[Script Info]\n")
-            f.write("Title: Karaoke with Space Mono\n")
-            f.write("ScriptType: v4.00+\n")
-            f.write("Collisions: Normal\n")
-            f.write(f"PlayResX: {self.video_width}\n")
-            f.write(f"PlayResY: {self.video_height}\n")
-            f.write("Timer: 100.0000\n\n")
-            
-            f.write("[V4+ Styles]\n")
-            f.write("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-                    "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
-                    "Alignment, MarginL, MarginR, MarginV, Encoding\n")
-            # Bottom style (alignment 2 = bottom center) - extremely close to middle
-            # Outline color: #ff3a52 -> BGR format: &H523AFF
-            f.write(f"Style: Main,{self.font_path},76,{primary_colour},{secondary_colour},{outline_colour},&H64000000,"
-                    "1,0,0,0,100,100,0,0,1,3,0,2,480,480,450,1\n")
-            f.write(f"Style: Shadow,{self.font_path},76,&H00FFFFFF,&HFFFFFFFF,&HFFFFFF,&H64000000,"
-                    "1,0,0,0,100,100,0,0,1,0,0,2,480,480,450,1\n")
-            # Top style (alignment 8 = top center) - extremely close to middle
-            f.write(f"Style: MainTop,{self.font_path},76,{primary_colour},{secondary_colour},{outline_colour},&H64000000,"
-                    "1,0,0,0,100,100,0,0,1,3,0,8,480,480,450,1\n")
-            f.write(f"Style: ShadowTop,{self.font_path},76,&H00FFFFFF,&HFFFFFFFF,&HFFFFFF,&H64000000,"
-                    "1,0,0,0,100,100,0,0,1,0,0,8,480,480,450,1\n\n")
-            
-            f.write("[Events]\n")
-            f.write("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
-            
-            for idx, start, end, text in segments:
-                if not text.strip():
-                    continue
-                start_ass = self.format_timestamp_ass(start)
-                end_ass = self.format_timestamp_ass(end)
-                line_duration = end - start
-                
-                words = text.split()
-                if not words:
-                    continue
-                
-                total_cs = int(line_duration * 100)
-                per_word_cs = max(total_cs // len(words), 1)
-                remainder = total_cs - (per_word_cs * len(words))
-                word_ks = [per_word_cs] * len(words)
-                if remainder > 0:
-                    word_ks[-1] += remainder
-                
-                # Alternate between bottom (even idx) and top (odd idx)
-                is_top = (idx % 2 == 1)
-                style_main = "MainTop" if is_top else "Main"
-                style_shadow = "ShadowTop" if is_top else "Shadow"
-                pos_y = pos_y_top if is_top else pos_y_bottom
-                pos_tag = f"\\an5\\pos({center_x},{pos_y})"
-                
-                # Calculate duration in milliseconds for smooth growth
-                duration_ms = int(line_duration * 1000)
-                
-                # Scale animation: smoothly grow from 100% to 120% over the entire duration
-                # \org sets the origin point for scaling (center of text)
-                main_line = "{\\fad(500,500)" + pos_tag + "\\fscx100\\fscy100\\t(0," + str(duration_ms) + ",\\fscx120\\fscy120)}"
-                for w, kcs in zip(words, word_ks):
-                    main_line += "{" + karaoke_tag + str(kcs) + "}" + str(w) + " "
-                main_line = main_line.strip()
-                
-                # Glow effect - blurred shadow layer with same animation
-                shadow_line = "{\\fad(500,500)" + pos_tag + "\\blur10\\3c&H000000&\\4c&H000000&\\fscx100\\fscy100\\t(0," + str(duration_ms) + ",\\fscx120\\fscy120)}"
-                for w, kcs in zip(words, word_ks):
-                    shadow_line += "{" + karaoke_tag + str(kcs) + "}" + str(w) + " "
-                shadow_line = shadow_line.strip()
-                
-                f.write(f"Dialogue: 0,{start_ass},{end_ass},{style_shadow},,0,0,0,,{shadow_line}\n")
-                f.write(f"Dialogue: 1,{start_ass},{end_ass},{style_main},,0,0,0,,{main_line}\n")
-        
-        print(f"ASS file created at '{ass_path}'.")
-        return True
+
+        # The ASS writer itself is shared with every render path (vertical
+        # reels, captation overlays) — src/render/ass_karaoke.py.
+        from src.render.ass_karaoke import write_karaoke_ass
+        ok = write_karaoke_ass(
+            [
+                {"start": s, "end": e, "text": t, "top": idx % 2 == 1}
+                for idx, s, e, t in segments
+            ],
+            ass_path,
+            video_width=self.video_width,
+            video_height=self.video_height,
+            # Historical behaviour: the font *path* is written as Fontname
+            # (libass resolves it via fontsdir / falls back) — preserved so
+            # renders stay byte-identical to previous karaoke outputs.
+            font_name=self.font_path,
+            font_size=76,
+            primary_colour=primary_colour,
+            secondary_colour=secondary_colour,
+            outline_colour=outline_colour,
+            progressive_fill=progressive_fill,
+            title="Karaoke with Space Mono",
+        )
+        if ok:
+            print(f"ASS file created at '{ass_path}'.")
+        return ok
     
     def overlay_subtitles_and_logo(
         self,

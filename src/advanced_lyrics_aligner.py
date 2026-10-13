@@ -611,10 +611,12 @@ class AdvancedLyricsAligner:
         
         # Sliding window search with fuzzy matching
         best_matched = 0
+        best_token_indices: List[int] = []
         for i in range(start_idx, search_end):
             # Try to match genius_tokens starting at position i
             score = 0
             matched = 0
+            matched_indices: List[int] = []
             
             # Allow some flexibility in matching (skip words if needed)
             whisper_pos = i
@@ -627,6 +629,7 @@ class AdvancedLyricsAligner:
                     if g_token == all_whisper_tokens[whisper_pos + k]:
                         score += 2  # Match
                         matched += 1
+                        matched_indices.append(whisper_pos + k)
                         whisper_pos += k + 1
                         found = True
                         break
@@ -644,28 +647,28 @@ class AdvancedLyricsAligner:
                 best_start = i
                 best_end = whisper_pos
                 best_matched = matched
+                best_token_indices = matched_indices
         
         # More permissive threshold: at least 20% of words matched
         min_required_matches = max(1, len(genius_tokens) // 5)
         
         # If we found a reasonable match
         if best_score > 0 and best_matched >= min_required_matches:
-            # Get actual matched indices (map back to original word indices)
+            # Use the token indices recorded during the scan — the fuzzy
+            # match may skip words, so best_start + j is NOT the matched
+            # position and a contiguous remap yields an empty list here.
             matched_word_indices = []
             matched_count = 0
             
-            for j, g_token in enumerate(genius_tokens):
-                token_idx = best_start + j
-                if token_idx < len(all_whisper_tokens) and g_token == all_whisper_tokens[token_idx]:
-                    # Map token index back to word index
-                    if token_to_word_idx:
-                        word_idx = token_to_word_idx[token_idx]
-                    else:
-                        word_idx = token_idx
-                    
-                    if word_idx not in matched_word_indices:  # Avoid duplicates
-                        matched_word_indices.append(word_idx)
-                    matched_count += 1
+            for token_idx in best_token_indices:
+                if token_to_word_idx:
+                    word_idx = token_to_word_idx[token_idx]
+                else:
+                    word_idx = token_idx
+                
+                if word_idx not in matched_word_indices:  # Avoid duplicates
+                    matched_word_indices.append(word_idx)
+                matched_count += 1
             
             if not matched_word_indices:
                 return None
