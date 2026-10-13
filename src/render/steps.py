@@ -581,12 +581,12 @@ def synth_color_background(
 
 
 # Fontname values in generated ASS files historically embed the font *file
-# path* (e.g. "legacy/karaoke/fonts/SpaceMono-Regular.ttf"), which libass
+# path* (e.g. "legacy/karaoke/fonts/DejaVuSans-Bold.ttf"), which libass
 # cannot resolve through fontconfig/CoreText — it silently falls back to a
 # default font. Rewriting the path to the family name lets libass match the
 # font when the filter's fontsdir (or fontconfig) provides the .ttf files.
 _ASS_FONTNAME_PATH_RE = re.compile(r"(?m)^(Style:[^,\n]*,)[^,\n]*\.ttf(,)")
-_ASS_FONT_FAMILY = "Space Mono"
+_ASS_FONT_FAMILY = "DejaVu Sans"
 
 
 def normalize_ass_font_path(ass_path: str, family: str = _ASS_FONT_FAMILY) -> bool:

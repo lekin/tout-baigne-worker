@@ -3,7 +3,7 @@ overlay look across every render path (full karaoke videos, GKDA vertical
 reels, captation reels).
 
 Recipe (identical to KaraokeGenerator.srt_to_ass_karaoke):
-- Space Mono bold, sung=yellow (&H0000FFFF) over upcoming=grey/pink,
+- DejaVu Sans bold, sung=yellow (&H0000FFFF) over upcoming=grey/pink,
   pink outline (&HA64DFF), blurred black glow layer underneath.
 - \\fad in/out, \\an5\\pos at the upper (~33%) / lower (~72%) third,
   alternating per line, line slowly grows 100→120% while displayed.
@@ -26,7 +26,7 @@ DEFAULT_PRIMARY = "&H0000FFFF"   # yellow (sung)
 DEFAULT_SECONDARY = "&H00CCCCCC"  # light grey (upcoming)
 DEFAULT_OUTLINE = "&HA64DFF"     # pink-magenta (BGR)
 
-FONT_FAMILY = "Space Mono"
+FONT_FAMILY = "DejaVu Sans"
 
 
 class KaraokeWord(TypedDict):

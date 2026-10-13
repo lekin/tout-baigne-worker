@@ -1431,7 +1431,7 @@ class KaraokeGenerator:
             secondary_colour=secondary_colour,
             outline_colour=outline_colour,
             progressive_fill=progressive_fill,
-            title="Karaoke with Space Mono",
+            title="Karaoke",
         )
         if ok:
             print(f"ASS file created at '{ass_path}'.")

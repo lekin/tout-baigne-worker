@@ -694,7 +694,7 @@ class ASSKaraokeGenerator:
         lrc_content: str,
         video_width: int = 1920,
         video_height: int = 1080,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         progressive_fill: bool = True,
         primary_colour: str = "&H0000FFFF",
@@ -719,7 +719,7 @@ class ASSKaraokeGenerator:
         synced_lines: List[SyncedLine],
         video_width: int = 1920,
         video_height: int = 1080,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         progressive_fill: bool = True,
         max_gap_seconds: float = 6.0,
@@ -1033,7 +1033,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         richsync_json: str,
         video_width: int = 1920,
         video_height: int = 1080,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         progressive_fill: bool = True,
         primary_colour: str = "&H0000FFFF",
@@ -1051,7 +1051,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             return ""
 
         ass_content = f"""[Script Info]
-Title: Karaoke Spotify Stack with Space Mono
+Title: Karaoke Spotify Stack
 ScriptType: v4.00+
 Collisions: Normal
 PlayResX: {video_width}
@@ -1446,7 +1446,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         synced_lines: List[SyncedLine],
         video_width: int = 1920,
         video_height: int = 1080,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         progressive_fill: bool = True,
         max_gap_seconds: float = 6.0,
@@ -1482,7 +1482,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         max_chars_per_line = max(10, int(available_w / max(avg_char_width, 1.0)))
 
         ass_content = f"""[Script Info]
-Title: Karaoke with Space Mono
+Title: Karaoke
 ScriptType: v4.00+
 Collisions: Normal
 PlayResX: {video_width}
@@ -1781,7 +1781,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         synced_lines: List[SyncedLine],
         video_width: int = 1080,
         video_height: int = 1920,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         region_x: int = 70,
         region_y: int = 560,
@@ -1824,7 +1824,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         )
 
     @staticmethod
-    def generate_from_richsync(richsync_json: str, video_width: int = 1920, video_height: int = 1080, font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf", offset_seconds: float = 0.0, progressive_fill: bool = True, primary_colour: str = "&H0000FFFF", secondary_colour: str = "&H00CCCCCC", outline_colour: str = "&HA64DFF", margin_l: int = 80, margin_r: int = 80, margin_v: int = 450, margin_v_top: Optional[int] = None, chorus_base_y: Optional[int] = None, font_size: int = 76) -> str:
+    def generate_from_richsync(richsync_json: str, video_width: int = 1920, video_height: int = 1080, font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf", offset_seconds: float = 0.0, progressive_fill: bool = True, primary_colour: str = "&H0000FFFF", secondary_colour: str = "&H00CCCCCC", outline_colour: str = "&HA64DFF", margin_l: int = 80, margin_r: int = 80, margin_v: int = 450, margin_v_top: Optional[int] = None, chorus_base_y: Optional[int] = None, font_size: int = 76) -> str:
         """
         Generate ASS karaoke format with word-level timing from Richsync JSON.
         Uses professional styling matching the existing karaoke generator.
@@ -1856,7 +1856,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         # ASS header with professional styling
         ass_content = f"""[Script Info]
-Title: Karaoke with Space Mono
+Title: Karaoke
 ScriptType: v4.00+
 Collisions: Normal
 PlayResX: {video_width}
@@ -2229,7 +2229,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         richsync_json: str,
         video_width: int = 1080,
         video_height: int = 1920,
-        font_path: str = "legacy/karaoke/fonts/SpaceMono-Regular.ttf",
+        font_path: str = "legacy/karaoke/fonts/DejaVuSans-Bold.ttf",
         offset_seconds: float = 0.0,
         region_x: int = 70,
         region_y: int = 560,

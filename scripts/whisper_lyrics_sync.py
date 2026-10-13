@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Sync known lyrics onto an audio clip using Whisper word timestamps.
+
+Used by the admin app's captation-reel pipeline: the rush's actual audio
+(crowd singing included) is transcribed word-level, then the track's real
+lyrics (Musixmatch RichSync/LRC text) are aligned onto those words with the
+Needleman-Wunsch aligner — so the displayed text is the correct lyric while
+the timing follows what is actually sung in the video. No master offset
+required.
+
+Usage:
+  whisper_lyrics_sync.py <audio.wav> <spec.json|->  →  prints JSON
+    {"lines": [{"start": s, "end": e, "text": "..."}], "report": {...}}
+
+Spec:
+  {"lyrics": "line one\nline two\n...",           // raw lyric text
+   "lines": [{"text": "..."}],                     // or pre-split lines
+   "model": "small",                               // whisper model (env WHISPER_MODEL)
+   "language": null}
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _transcribe_words(audio_path: str, model_name: str, language):
+    """whisper word-level transcription → [{word, start, end}]."""
+    import whisper
+
+    model = whisper.load_model(model_name)
+    result = model.transcribe(
+        audio_path,
+        word_timestamps=True,
+        language=language or None,
+        verbose=False,
+        condition_on_previous_text=False,
+    )
+    words = []
+    for seg in result.get("segments", []):
+        for w in seg.get("words", []):
+            words.append(
+                {
+                    "word": w.get("word", "").strip(),
+                    "start": float(w.get("start", 0.0)),
+                    "end": float(w.get("end", 0.0)),
+                    "confidence": float(w.get("probability", 1.0) or 0.0),
+                }
+            )
+    return [w for w in words if w["word"]]
+
+
+def main() -> int:
+    if len(sys.argv) < 3:
+        print("usage: whisper_lyrics_sync.py <audio> <spec.json|->", file=sys.stderr)
+        return 2
+    audio_path, spec_arg = sys.argv[1], sys.argv[2]
+    try:
+        if spec_arg == "-":
+            spec = json.load(sys.stdin)
+        else:
+            with open(spec_arg, "r", encoding="utf-8") as f:
+                spec = json.load(f)
+    except Exception as e:
+        print(f"invalid spec JSON: {e}", file=sys.stderr)
+        return 2
+
+    lyrics_text = spec.get("lyrics") or "\n".join(
+        l.get("text", "") for l in spec.get("lines", [])
+    )
+    if not lyrics_text.strip():
+        print("spec: no lyrics text", file=sys.stderr)
+        return 1
+
+    model_name = spec.get("model") or os.environ.get("WHISPER_MODEL", "small")
+    words = _transcribe_words(audio_path, model_name, spec.get("language"))
+    if not words:
+        print(json.dumps({"lines": [], "report": {"reason": "no words heard"}}))
+        return 0
+
+    from src.advanced_lyrics_aligner import AdvancedLyricsAligner
+
+    aligner = AdvancedLyricsAligner()
+    srt_content, report = aligner.align_lyrics_to_whisper(lyrics_text, words)
+
+    # SRT → line dicts (kept simple — the aligner owns the formatting).
+    import re
+
+    lines = []
+    for block in re.split(r"\n\s*\n", srt_content.strip()):
+        rows = block.strip().split("\n")
+        if len(rows) < 3 or " --> " not in rows[1]:
+            continue
+        a, b = rows[1].split(" --> ")
+
+        def ts(v: str) -> float:
+            h, m, rest = v.replace(",", ".").split(":")
+            return int(h) * 3600 + int(m) * 60 + float(rest)
+
+        lines.append(
+            {"start": ts(a), "end": ts(b), "text": " ".join(rows[2:]).strip()}
+        )
+
+    print(json.dumps({"lines": lines, "report": report}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

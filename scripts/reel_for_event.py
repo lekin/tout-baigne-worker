@@ -222,13 +222,13 @@ def _render_cover(bg_url: str, title: str, out_path: Path,
                   palette=("&H0000FFFF", "&H00CCCCCC", "&HA64DFF")) -> bool:
     """Render a 1080x1920 cover: event visual + song title in karaoke typography.
 
-    Same treatment as the lyric overlays — SpaceMono bold, primary/outline
+    Same treatment as the lyric overlays — DejaVu Sans bold, primary/outline
     palette — so the title card matches the reel's look. Title stays on one
     line: font size shrinks to fit ~920px of usable width.
     """
     primary, _secondary, outline = palette
-    font_name = "SpaceMono"
-    # SpaceMono bold ≈ 0.62em advance width → fit title in one line.
+    font_name = "DejaVu Sans"
+    # DejaVu Sans bold ≈ 0.60em avg advance → fit title in one line.
     font_size = min(72, int(1480 / max(len(title), 1)))
     ass = f"""[Script Info]
 ScriptType: v4.00+
@@ -313,6 +313,14 @@ def main() -> None:
     parser.add_argument("--track-id", action="append", help="One or more track record IDs. Can be passed multiple times. If fewer tracks than backgrounds, they cycle.")
     parser.add_argument("--shortlist", type=str, default=None, help="Path to a JSON shortlist (e.g. output/gkda_top_tracks.json). If passed, uses top tracks from that file.")
     parser.add_argument("--template-id", default=None)
+    parser.add_argument("--backgrounds", default=None,
+                        help="Comma-separated background images instead of the "
+                             "Airtable lookup: 'layer1=url1,layer2=url2' or bare "
+                             "URLs. Lets the caller render backgrounds on the fly.")
+    parser.add_argument("--event-type-id", default=None,
+                        help="Scope generation to one Event types record id "
+                             "(room tab): picks that type's track pool and only "
+                             "backgrounds whose template is linked to it.")
     parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--limit", type=int, default=None, help="Max number of reels to generate (defaults to all backgrounds)")
     parser.add_argument("--fast", action="store_true")
@@ -362,7 +370,10 @@ def main() -> None:
                 for a in fields.get("Generated asset", []):
                     m = _re.search(r"reel_(rec[A-Za-z0-9]+)", a.get("filename", ""))
                     if m:
-                        bg_rec = assets_table.get(m.group(1))
+                        try:
+                            bg_rec = assets_table.get(m.group(1))
+                        except Exception:
+                            continue  # source asset may have been deleted
                         bg_url = _attachment_url(bg_rec.get("fields", {}).get("Generated asset"))
                         break
             if not bg_url:
@@ -384,7 +395,7 @@ def main() -> None:
     event_name = event_fields.get("Name") or args.event_id
     print(f"🎉 Event: {event_name}")
 
-    event_type_id = _first_text(event_fields.get("Type"))
+    event_type_id = args.event_type_id or _first_text(event_fields.get("Type"))
     if not event_type_id:
         print("❌ Event has no event type", file=sys.stderr)
         sys.exit(1)
@@ -431,21 +442,79 @@ def main() -> None:
                 sys.exit(1)
         random.shuffle(track_pool)
 
-    bg_assets = _find_background_assets(client, args.event_id)
-    # Keep pure image backgrounds only — generated video records (mp4, or
-    # mp4+cover jpg) must not be reused as backgrounds.
-    def _is_plain_image_asset(a: Dict[str, Any]) -> bool:
-        atts = a.get("fields", {}).get("Generated asset") or []
-        has_image = any(str(x.get("type", "")).startswith("image/") for x in atts if isinstance(x, dict))
-        has_video = any(str(x.get("type", "")).startswith("video/") for x in atts if isinstance(x, dict))
-        return has_image and not has_video
-    bg_assets = [a for a in bg_assets if _is_plain_image_asset(a)]
+    if args.backgrounds:
+        # Caller-rendered backgrounds (e.g. straight from Placid): pseudo
+        # asset records so the render loop stays unchanged. No Airtable lookup.
+        bg_assets = []
+        for i, item in enumerate(args.backgrounds.split(","), start=1):
+            item = item.strip()
+            if not item:
+                continue
+            if item.startswith("http"):
+                bg_name, bg_url = f"bg_{i}", item
+            else:
+                bg_name, _, bg_url = item.partition("=")
+                bg_name = bg_name or f"bg_{i}"
+            bg_assets.append({
+                "id": bg_name,
+                "fields": {
+                    "Background layer": bg_name,
+                    "Generated asset": [{"url": bg_url, "type": "image/jpeg"}],
+                },
+            })
+        print(f"🎯 {len(bg_assets)} caller-provided background(s)")
+    else:
+        bg_assets = _find_background_assets(client, args.event_id)
+        # Keep pure image backgrounds only — generated video records (mp4, or
+        # mp4+cover jpg) must not be reused as backgrounds.
+        def _is_plain_image_asset(a: Dict[str, Any]) -> bool:
+            atts = a.get("fields", {}).get("Generated asset") or []
+            has_image = any(str(x.get("type", "")).startswith("image/") for x in atts if isinstance(x, dict))
+            has_video = any(str(x.get("type", "")).startswith("video/") for x in atts if isinstance(x, dict))
+            return has_image and not has_video
+        bg_assets = [a for a in bg_assets if _is_plain_image_asset(a)]
+
+        # Room scope: keep only backgrounds whose template is linked to the
+        # requested event type (e.g. Central → Chronologic backgrounds only).
+        if args.event_type_id:
+            scope_name = args.event_type_id
+            try:
+                scope_name = client.get_table("Event types").get(
+                    args.event_type_id).get("fields", {}).get("Name", scope_name)
+            except Exception:
+                pass
+            templates_table = client.get_table("Visual assets templates")
+            tpl_type_cache: Dict[str, List[str]] = {}
+
+            def _asset_in_scope(asset: Dict[str, Any]) -> bool:
+                for tid in asset.get("fields", {}).get("Template") or []:
+                    if tid not in tpl_type_cache:
+                        try:
+                            tpl_type_cache[tid] = list(
+                                templates_table.get(tid).get("fields", {}).get("Event type") or [])
+                        except Exception:
+                            tpl_type_cache[tid] = []
+                    if args.event_type_id in tpl_type_cache[tid]:
+                        return True
+                return False
+
+            before = len(bg_assets)
+            bg_assets = [a for a in bg_assets if _asset_in_scope(a)]
+            print(f"🎯 Scoped to event type '{scope_name}': "
+                  f"{len(bg_assets)}/{before} background(s)")
+
     if args.limit:
         random.shuffle(bg_assets)
         bg_assets = bg_assets[: args.limit]
 
     if not bg_assets:
-        print("❌ No background image assets found for this event", file=sys.stderr)
+        if args.event_type_id and not args.backgrounds:
+            print(f"❌ No background image assets for event type '{scope_name}'"
+                  " — the type needs an 'Instagram reel background' template"
+                  " and generated backgrounds", file=sys.stderr)
+        else:
+            print("❌ No background image assets found for this event",
+                  file=sys.stderr)
         sys.exit(1)
 
     # Derive the Airtable template from the existing background assets so that the
@@ -466,8 +535,17 @@ def main() -> None:
                 template_info = {"id": t["id"], "name": t["fields"].get("Name", "")}
             except Exception:
                 pass
+        if not template_info:
+            # No background records to inherit from (--backgrounds mode): use
+            # the "Instagram reel background" template linked to this type.
+            for t in client.get_table("Visual assets templates").all(
+                    fields=["Name", "Event type", "Type"]):
+                if (event_type_id in (t["fields"].get("Event type") or [])
+                        and "reel background" in str(t["fields"].get("Type", "")).lower()):
+                    template_info = {"id": t["id"], "name": t["fields"].get("Name", "")}
+                    break
     if not template_info:
-        print("❌ Could not determine Visual assets template from background assets", file=sys.stderr)
+        print("❌ Could not determine Visual assets template for the reels", file=sys.stderr)
         sys.exit(1)
 
     python = PROJECT_ROOT / ".venv" / "bin" / "python"
@@ -483,6 +561,7 @@ def main() -> None:
         qa_runner = KaraokeQARunner(verbose=False)
     verified_source_cache: Dict[str, Optional[str]] = {}
 
+    track_idx = 0
     for i, asset in enumerate(bg_assets, start=1):
         fields = asset.get("fields", {})
         bg_name = fields.get("Background layer", f"bg_{i}")
@@ -491,24 +570,39 @@ def main() -> None:
             print(f"⚠️  No background image URL for {bg_name}, skipping")
             continue
 
-        track_id = track_pool[i % len(track_pool)]
-        track_record = client.table.get(track_id)
-        track_name = track_record.get("fields", {}).get("Name", track_id)
-        print(f"\n[{i}/{len(bg_assets)}] Background: {bg_name}  →  Track: {track_name}")
-
+        # Take the next track in the pool that passes lyrics QA — a failed
+        # track no longer burns its background, we move down the pool instead.
+        track_id: Optional[str] = None
+        track_record: Optional[Dict[str, Any]] = None
+        track_name = ""
         lyrics_source: Optional[str] = None
-        if qa_runner is not None:
-            if track_id not in verified_source_cache:
+        while track_idx < len(track_pool):
+            cand = track_pool[track_idx]
+            track_idx += 1
+            rec = client.table.get(cand)
+            name = rec.get("fields", {}).get("Name", cand)
+            if qa_runner is None:
+                track_id, track_record, track_name = cand, rec, name
+                break
+            if cand not in verified_source_cache:
                 try:
-                    verified_source_cache[track_id] = _pick_verified_lyrics_source(
-                        client, qa_runner, track_record)
+                    verified_source_cache[cand] = _pick_verified_lyrics_source(
+                        client, qa_runner, rec)
                 except Exception as e:
-                    print(f"⚠️  QA verification failed for {track_name}: {e}")
-                    verified_source_cache[track_id] = None
-            lyrics_source = verified_source_cache[track_id]
-            if not lyrics_source:
-                print(f"❌ No lyrics source verified against the audio for {track_name}, skipping")
+                    print(f"⚠️  QA verification failed for {name}: {e}")
+                    verified_source_cache[cand] = None
+            src = verified_source_cache[cand]
+            if not src:
+                print(f"❌ No lyrics source verified against the audio for {name}")
                 continue
+            track_id, track_record, track_name = cand, rec, name
+            lyrics_source = src
+            break
+        if track_id is None or track_record is None:
+            print(f"⚠️  No track left in the pool that passes lyrics QA — {bg_name} skipped")
+            continue
+        print(f"\n[{i}/{len(bg_assets)}] Background: {bg_name}  →  Track: {track_name}")
+        if lyrics_source:
             print(f"  ✅ Using verified lyrics source: {lyrics_source}")
 
         # Embed the source background asset id in the filename — the durable
