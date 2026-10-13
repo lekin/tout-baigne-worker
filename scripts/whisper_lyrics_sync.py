@@ -32,7 +32,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def _transcribe_words(audio_path: str, model_name: str, language):
+def _transcribe_words(audio_path: str, model_name: str, language, prompt: str = ""):
     """whisper word-level transcription → [{word, start, end}]."""
     import contextlib
 
@@ -48,6 +48,9 @@ def _transcribe_words(audio_path: str, model_name: str, language):
             language=language or None,
             verbose=False,
             condition_on_previous_text=False,
+            # Known lyrics prime the vocabulary — timing stays whisper's
+            # own, so a transcript still follows the actual audio.
+            initial_prompt=prompt or None,
         )
     words = []
     for seg in result.get("segments", []):
@@ -63,7 +66,7 @@ def _transcribe_words(audio_path: str, model_name: str, language):
     return [w for w in words if w["word"]]
 
 
-def _transcribe_segments(audio_path: str, model_name: str, language):
+def _transcribe_segments(audio_path: str, model_name: str, language, prompt: str = ""):
     """Whisper segments → transcript lines (one ASS line per segment)."""
     import contextlib
 
@@ -77,6 +80,7 @@ def _transcribe_segments(audio_path: str, model_name: str, language):
             language=language or None,
             verbose=False,
             condition_on_previous_text=False,
+            initial_prompt=prompt or None,
         )
     lines = []
     for seg in result.get("segments", []):
@@ -120,15 +124,22 @@ def main() -> int:
         return 1
 
     model_name = spec.get("model") or os.environ.get("WHISPER_MODEL", "small")
+    # initial_prompt is capped by whisper at ~224 tokens — the first chunk
+    # of the lyric text is enough to prime vocabulary.
+    prompt = (spec.get("prompt") or lyrics_text or "")[:1500]
 
     def transcript_lines():
-        return _transcribe_segments(audio_path, model_name, spec.get("language"))
+        return _transcribe_segments(
+            audio_path, model_name, spec.get("language"), prompt
+        )
 
     if mode == "transcript":
         print(json.dumps({"lines": transcript_lines(), "mode": "transcript"}))
         return 0
 
-    words = _transcribe_words(audio_path, model_name, spec.get("language"))
+    words = _transcribe_words(
+        audio_path, model_name, spec.get("language"), prompt
+    )
     lines, report = [], {}
     if words:
         from src.advanced_lyrics_aligner import AdvancedLyricsAligner
