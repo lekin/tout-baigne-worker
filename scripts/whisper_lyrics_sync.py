@@ -27,16 +27,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def _transcribe_words(audio_path: str, model_name: str, language):
     """whisper word-level transcription → [{word, start, end}]."""
+    import contextlib
+
     import whisper
 
     model = whisper.load_model(model_name)
-    result = model.transcribe(
-        audio_path,
-        word_timestamps=True,
-        language=language or None,
-        verbose=False,
-        condition_on_previous_text=False,
-    )
+    # whisper prints "Detected language" etc. to stdout — keep stdout clean
+    # for the JSON result.
+    with contextlib.redirect_stdout(sys.stderr):
+        result = model.transcribe(
+            audio_path,
+            word_timestamps=True,
+            language=language or None,
+            verbose=False,
+            condition_on_previous_text=False,
+        )
     words = []
     for seg in result.get("segments", []):
         for w in seg.get("words", []):
@@ -81,8 +86,15 @@ def main() -> int:
 
     from src.advanced_lyrics_aligner import AdvancedLyricsAligner
 
+    # The aligner chatters to stdout (section detection, skips, merges) —
+    # stdout is reserved for the JSON result, so logs go to stderr.
+    import contextlib
+
     aligner = AdvancedLyricsAligner()
-    srt_content, report = aligner.align_lyrics_to_whisper(lyrics_text, words)
+    with contextlib.redirect_stdout(sys.stderr):
+        srt_content, report = aligner.align_lyrics_to_whisper(
+            lyrics_text, words
+        )
 
     # SRT → line dicts (kept simple — the aligner owns the formatting).
     import re
