@@ -94,6 +94,11 @@ def main() -> int:
         print("ASS generator produced no content", file=sys.stderr)
         return 1
 
+    # Captation reels: never let a growing line wrap — clipped beats
+    # two-line karaoke for readability.
+    if spec.get("wrap") is False and "WrapStyle" not in ass:
+        ass = ass.replace("Timer: 100.0000", "Timer: 100.0000\nWrapStyle: 2", 1)
+
     # The reel generators historically write the font *path* as Fontname —
     # normalize to the family name so libass resolves it via fontsdir.
     from src.render.steps import normalize_ass_font_path
