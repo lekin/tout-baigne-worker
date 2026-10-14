@@ -171,6 +171,24 @@ def main() -> int:
                 {"start": ts(a), "end": ts(b), "text": " ".join(rows[2:]).strip()}
             )
 
+        # Sanity filter: the aligner interpolates unheard lines into
+        # whatever gap remains — on clips where whisper only caught the
+        # tail, that's a fast cascade of "catch-up" lyrics. Drop anything
+        # too fast to read (>~20 cps) or fully contained in a merged line.
+        lines = [
+            l
+            for l in lines
+            if l["end"] - l["start"] >= max(0.7, len(l["text"]) / 20.0)
+        ]
+        lines = [
+            l
+            for l in lines
+            if not any(
+                o is not l and o["start"] <= l["start"] and l["end"] <= o["end"]
+                for o in lines
+            )
+        ]
+
     if not lines and mode == "auto":
         # Nothing alignable — fall back to whisper's own transcript so the
         # reel still gets synced text.
