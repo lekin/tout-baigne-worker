@@ -123,6 +123,38 @@ def main() -> int:
         print("spec: no lyrics text", file=sys.stderr)
         return 1
 
+    # vocals: isolate the voice stem first — crowd/instrumental noise is
+    # what makes whisper hallucinate on rushes. On failure we keep the
+    # raw audio rather than aborting.
+    if spec.get("vocals"):
+        import contextlib
+        import tempfile
+
+        vocals_path = os.path.join(
+            tempfile.mkdtemp(prefix="lyr-vocals-"), "vocals.wav"
+        )
+        try:
+            from src.qa.separator import (
+                PyTorchDemucsSeparator,
+                VocalSeparationConfig,
+            )
+
+            with contextlib.redirect_stdout(sys.stderr):
+                ok = PyTorchDemucsSeparator().separate(
+                    audio_path,
+                    vocals_path,
+                    VocalSeparationConfig(
+                        model=spec.get("vocal_model", "htdemucs"),
+                        device=spec.get("vocal_device"),
+                    ),
+                )
+            if ok:
+                audio_path = vocals_path
+            else:
+                print("vocal separation failed — raw audio", file=sys.stderr)
+        except Exception as e:
+            print(f"vocal separation unavailable: {e}", file=sys.stderr)
+
     model_name = spec.get("model") or os.environ.get("WHISPER_MODEL", "small")
     # initial_prompt is capped by whisper at ~224 tokens — the first chunk
     # of the lyric text is enough to prime vocabulary.
