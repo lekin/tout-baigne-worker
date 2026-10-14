@@ -27,7 +27,8 @@ from scipy.signal import correlate, stft
 
 SR = 16000
 HOP = 160  # 10 ms hop → envelope at 100 fps
-SEARCH_S = 6.0  # ± search window around the coarse anchor
+SEARCH_S = 10.0  # ± search window around the coarse anchor (lone Shazam
+# probes can be several seconds off)
 MIN_SCORE = 0.18  # NCC peak below this = crowd buried the signal
 
 
